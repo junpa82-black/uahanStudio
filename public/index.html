@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>우아한블로그 스튜디오</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>우아한블로그 스튜디오</h1>
+      <p class="muted">Vercel · 검색 → 분석 → 생성 → 이미지</p>
+    </header>
+
+    <div class="layout">
+      <main>
+        <div class="panel">
+          <label for="keyword">키워드 입력</label>
+          <input id="keyword" type="text" placeholder="예: 제주도 가족여행" />
+
+          <div class="row" style="margin-top: 0.75rem">
+            <div style="flex: 1; min-width: 140px">
+              <label for="tone">생성 스타일</label>
+              <select id="tone">
+                <option value="전문가톤">전문가톤</option>
+                <option value="친근톤">친근톤</option>
+                <option value="브랜디드톤">브랜디드톤</option>
+              </select>
+            </div>
+            <div style="flex: 1; min-width: 140px">
+              <label for="sort">검색 정렬</label>
+              <select id="sort">
+                <option value="sim">관련도순 (sim)</option>
+                <option value="date">최신순 (date)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row">
+            <button class="primary" id="btn-search">검색 실행</button>
+            <button id="btn-generate">생성하기</button>
+            <button id="btn-summarize">요약하기</button>
+            <button id="btn-images">이미지 생성 및 삽입</button>
+            <button id="btn-download">다운로드 (md + 이미지)</button>
+          </div>
+          <div id="status" class="muted"></div>
+        </div>
+
+        <h2>Feed</h2>
+        <div id="feed"></div>
+
+        <h2>Firecrawl 분석 결과</h2>
+        <div id="analysis" class="panel muted">생성·요약 실행 후 표시됩니다.</div>
+
+        <h2>생성된 블로그 초안</h2>
+        <div class="panel">
+          <pre class="out" id="draft">(없음)</pre>
+        </div>
+      </main>
+
+      <aside>
+        <h2>Trending Insights</h2>
+        <div id="trending" class="panel"></div>
+
+        <h2>Clear Thought 요약</h2>
+        <div class="panel">
+          <div id="summary" class="muted">요약하기 버튼으로 생성합니다.</div>
+        </div>
+      </aside>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

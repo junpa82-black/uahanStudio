@@ -1,31 +1,47 @@
-# Naver MCP Blog Studio
+# 우아한블로그 스튜디오 (Uahan Studio)
 
-키워드를 입력하면 네이버 블로그를 관련도순으로 상위 10개 검색하고, 상위 5개 글을 Firecrawl로 분석해 핵심 키워드/요약을 제공합니다.  
-분석 결과를 벤치마킹해 완전히 새로운 블로그 초안을 생성하고, Replicate로 어울리는 이미지를 자동 생성/삽입한 뒤 바탕화면에 저장할 수 있습니다.
+네이버 블로그 검색 → 상위 글 본문 분석(Firecrawl) → 작가형 초안 생성 → 이미지 삽입까지 지원합니다.
 
-## 실행 방법
+## Vercel 배포
+
+1. GitHub 저장소를 Vercel에 연결합니다.
+2. **환경 변수** (Project → Settings → Environment Variables):
+
+   - `NAVER_CLIENT_ID`
+   - `NAVER_CLIENT_SECRET`
+   - `FIRECRAWL_API_KEY`
+   - `OPENAI_API_KEY` (선택, 없으면 로컬 고도화 생성기 사용)
+   - `REPLICATE_API_TOKEN` (선택, 없거나 402 시 Pollinations 대체)
+
+3. 배포 후 루트 URL에서 `public/index.html` UI를 사용합니다. API는 `/api/*` (예: `/api/search`, `/api/health`)입니다.
+
+### API 요약
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/api/health` | 헬스 체크 |
+| POST | `/api/search` | `{ "keyword", "sort": "sim" \| "date" }` |
+| POST | `/api/analyze` | `{ "results": [ 검색 결과 배열 ] }` |
+| POST | `/api/generate` | `{ "keyword", "tone", "analyzed" }` |
+| POST | `/api/summarize` | `{ "keyword", "analyzed" }` |
+| POST | `/api/images` | `{ "keyword", "markdown" }` |
+
+## 로컬 Streamlit UI
 
 ```powershell
-cd C:\Users\user\cursorstudy\naver-mcp-blog-studio
+cd uahanStudio
 python -m venv .venv
 .\.venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 copy .env.example .env
 streamlit run app.py
 ```
 
-## 필수 환경변수
+## 로컬 API만 실행 (선택)
 
-- `NAVER_CLIENT_ID`
-- `NAVER_CLIENT_SECRET`
-- `FIRECRAWL_API_KEY` (Firecrawl 분석용)
-- `OPENAI_API_KEY` (신규 글 생성 품질 향상용, 없으면 로컬 고도화 생성)
-- `REPLICATE_API_TOKEN` (Replicate 이미지 생성용)
+```powershell
+pip install -r requirements.txt
+uvicorn api.index:app --reload --port 8000
+```
 
-## 주요 기능
-
-- `검색 실행`: Naver MCP(`mcp_naver.server.search_blog`)로 상위 10개 검색
-- `Firecrawl로 상위 5개 분석`: 본문 수집 후 키워드/요약 생성
-- `생성하기`: 5개 분석 결과를 참고해 창의적인 신규 블로그 글 생성
-- `이미지 생성 및 자동 삽입`: Replicate(FLUX)로 이미지 2장을 생성해 플레이스홀더 자동 치환
-- `저장하기`: 마크다운 + 생성 이미지를 함께 바탕화면 폴더에 저장
+`public/index.html`의 `fetch("/api/...")`는 동일 출처가 아니면 실패하므로, 이때는 프록시를 쓰거나 `app.js`의 API base URL을 수정하세요.
