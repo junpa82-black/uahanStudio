@@ -1,7 +1,9 @@
 import base64
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -16,6 +18,23 @@ app.add_middleware(
 )
 
 router = APIRouter(prefix="/api")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+PUBLIC_DIR = ROOT_DIR / "public"
+
+
+@app.get("/")
+def index_html():
+    return FileResponse(PUBLIC_DIR / "index.html")
+
+
+@app.get("/app.js")
+def app_js():
+    return FileResponse(PUBLIC_DIR / "app.js", media_type="application/javascript")
+
+
+@app.get("/styles.css")
+def styles_css():
+    return FileResponse(PUBLIC_DIR / "styles.css", media_type="text/css")
 
 
 class SearchBody(BaseModel):
