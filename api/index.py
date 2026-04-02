@@ -290,6 +290,8 @@ async def search(body: SearchBody) -> dict[str, Any]:
         label = "관련도(sim)" if body.sort == "sim" else "최신순(date)"
         rows = [{**item, "ranking_basis": label} for item in rows]
         return {"results": rows, "sort": body.sort, "sort_label": label}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

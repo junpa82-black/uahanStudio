@@ -11,7 +11,6 @@ from typing import Any
 from urllib.parse import quote_plus, urlparse
 
 import httpx
-from mcp_naver import server as naver_server
 
 try:
     from dotenv import load_dotenv
@@ -56,7 +55,24 @@ def strip_html(text: str) -> str:
 
 
 async def search_blog_by_naver_mcp(query: str, display: int = 10, sort: str = "sim") -> list[dict[str, Any]]:
-    raw = await naver_server.search_blog(query=query, display=display, start=1, sort=sort)
+    """네이버 블로그 검색 API 직접 호출 (환경변수 미설정 시 None 헤더로 httpx 오류 나지 않도록 처리)."""
+    client_id = _env("NAVER_CLIENT_ID")
+    client_secret = _env("NAVER_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise ValueError(
+            "NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET을 환경 변수에 설정해 주세요. "
+            "(Vercel: Project → Settings → Environment Variables)"
+        )
+    url = "https://openapi.naver.com/v1/search/blog.json"
+    headers = {
+        "X-Naver-Client-Id": client_id,
+        "X-Naver-Client-Secret": client_secret,
+    }
+    params = {"query": query, "display": display, "start": 1, "sort": sort}
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        raw = response.text
     payload = json.loads(raw)
     items = payload.get("items", [])
     normalized = []

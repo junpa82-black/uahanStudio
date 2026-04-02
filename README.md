@@ -45,3 +45,5 @@ uvicorn api.index:app --reload --port 8000
 ```
 
 `public/index.html`의 `fetch("/api/...")`는 동일 출처가 아니면 실패하므로, 이때는 프록시를 쓰거나 `app.js`의 API base URL을 수정하세요.
+
+네이버 검색은 `mcp-naver` 대신 **공식 Open API**를 `httpx`로 직접 호출합니다. `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET`이 비어 있으면 검색 전에 안내 메시지가 반환됩니다.
