@@ -52,7 +52,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
   <body>
     <header>
       <h1>우아한블로그 스튜디오</h1>
-      <p class="muted">Vercel · 검색 → 분석 → 생성 → 이미지</p>
     </header>
 
     <div class="layout">
