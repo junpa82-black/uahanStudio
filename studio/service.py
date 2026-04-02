@@ -5,6 +5,7 @@ import random
 import re
 from collections import Counter
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from html import unescape
 from pathlib import Path
 from typing import Any
@@ -87,6 +88,123 @@ async def search_blog_by_naver_mcp(query: str, display: int = 10, sort: str = "s
             }
         )
     return normalized
+
+
+def _format_naver_pub_date(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = parsedate_to_datetime(raw)
+        return parsed.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return raw
+
+
+async def search_news_by_naver_api(query: str, display: int = 12, sort: str = "date") -> list[dict[str, Any]]:
+    """네이버 뉴스 검색 API 직접 호출."""
+    client_id = _env("NAVER_CLIENT_ID")
+    client_secret = _env("NAVER_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise ValueError(
+            "NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET을 환경 변수에 설정해 주세요. "
+            "(Vercel: Project → Settings → Environment Variables)"
+        )
+
+    url = "https://openapi.naver.com/v1/search/news.json"
+    headers = {
+        "X-Naver-Client-Id": client_id,
+        "X-Naver-Client-Secret": client_secret,
+    }
+    params = {"query": query, "display": display, "start": 1, "sort": sort}
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        payload = response.json()
+
+    normalized = []
+    for item in payload.get("items", []):
+        source_link = (item.get("originallink") or "").strip()
+        naver_link = (item.get("link") or "").strip()
+        final_link = source_link or naver_link
+        source_name = "뉴스"
+        if source_link:
+            host = (urlparse(source_link).netloc or "").replace("www.", "")
+            source_name = host or source_name
+        normalized.append(
+            {
+                "title": strip_html(item.get("title", "")),
+                "description": strip_html(item.get("description", "")),
+                "link": final_link,
+                "originallink": source_link,
+                "naverlink": naver_link,
+                "source": source_name,
+                "pubDate": _format_naver_pub_date(item.get("pubDate", "")),
+            }
+        )
+    return normalized
+
+
+def _categorize_economy_article(text: str) -> str:
+    corpus = (text or "").lower()
+    rules = [
+        ("정책·금리", ["금리", "기준금리", "한국은행", "연준", "fomc", "물가", "cpi", "pce"]),
+        ("증시·투자", ["주가", "증시", "코스피", "코스닥", "나스닥", "s&p", "etf", "투자"]),
+        ("부동산", ["부동산", "주택", "아파트", "분양", "전세", "월세", "재건축"]),
+        ("환율·원자재", ["환율", "달러", "원화", "유가", "원유", "금값", "원자재"]),
+        ("기업·산업", ["실적", "매출", "영업이익", "반도체", "수출", "공급망", "기업"]),
+    ]
+    for category, keywords in rules:
+        if any(keyword in corpus for keyword in keywords):
+            return category
+    return "글로벌·기타"
+
+
+def build_economy_briefing(topic: str, results: list[dict[str, Any]]) -> str:
+    picked = results[:10]
+    if not picked:
+        return "분석할 뉴스가 없어 브리핑을 생성하지 못했습니다."
+
+    keyword_counter: Counter[str] = Counter()
+    category_counter: Counter[str] = Counter()
+    headline_lines: list[str] = []
+
+    for row in picked:
+        title = row.get("title", "").strip()
+        desc = row.get("description", "").strip()
+        source = row.get("source", "뉴스")
+        published = row.get("pubDate", "")
+        category = _categorize_economy_article(f"{title} {desc}")
+        category_counter.update([category])
+        keyword_counter.update(extract_keywords(f"{title} {desc}", top_k=5))
+        headline_lines.append(
+            f"- [{category}] {title}\n  - 출처: {source}"
+            + (f" · {published}" if published else "")
+        )
+
+    top_keywords = [k for k, _ in keyword_counter.most_common(8)]
+    top_categories = [f"{name} {count}건" for name, count in category_counter.most_common(3)]
+    dominant = category_counter.most_common(1)[0][0]
+    now_label = datetime.now().strftime("%Y-%m-%d %H:%M")
+    keyword_line = ", ".join(top_keywords) if top_keywords else "경제, 시장, 정책"
+    category_line = " / ".join(top_categories) if top_categories else "분류 데이터 부족"
+
+    insights = [
+        f"헤드라인 분포상 **{dominant}** 이슈 비중이 높아, 단기 뉴스 흐름이 해당 축에 집중되고 있습니다.",
+        "여러 기사에서 공통으로 등장한 키워드는 시장 참여자들이 현재 가장 민감하게 보는 변수로 해석할 수 있습니다.",
+        "실행 측면에서는 수치(금리·환율·지수) 업데이트를 확인한 뒤, 산업/기업 뉴스와 교차 검증하는 순서가 안전합니다.",
+    ]
+
+    return (
+        f"### 경제 데일리 브리핑: {topic}\n\n"
+        f"- 기준 시각: {now_label}\n"
+        f"- 핵심 키워드: {keyword_line}\n"
+        f"- 이슈 분포: {category_line}\n\n"
+        "#### 주요 헤드라인\n"
+        + "\n".join(headline_lines[:6])
+        + "\n\n#### 오늘의 시사점\n"
+        + "\n".join([f"{idx}. {line}" for idx, line in enumerate(insights, start=1)])
+    )
 
 
 def extract_keywords(text: str, top_k: int = 6) -> list[str]:

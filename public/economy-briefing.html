@@ -55,17 +55,201 @@
       </nav>
 
       <div class="layout-main">
-        <div class="placeholder-page">
-          <div class="placeholder-hero">
-            <span class="placeholder-badge">준비 중</span>
-            <h1>경제 데일리 브리핑</h1>
-            <p class="lede">
-              매일 경제 뉴스·지표를 모아 한눈에 보는 브리핑 기능을 만들 예정입니다. 곧 이 페이지에서 요약과 알림을 받을 수
-              있게 연결할 수 있습니다.
-            </p>
+        <div class="page-wrap">
+          <div class="feed-column">
+            <div class="create-card">
+              <label for="economy-keyword">브리핑 키워드</label>
+              <input
+                id="economy-keyword"
+                type="text"
+                value="한국 금리 환율 증시"
+                placeholder="예: 미국 금리 인하, 반도체 수출, 환율"
+                autocomplete="off"
+              />
+
+              <div class="field-row">
+                <div>
+                  <label for="economy-sort">검색 정렬</label>
+                  <select id="economy-sort">
+                    <option value="date">최신순(date)</option>
+                    <option value="sim">관련도순(sim)</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="economy-limit">브리핑 범위</label>
+                  <input id="economy-limit" type="text" value="최근 뉴스 12건" readonly />
+                </div>
+              </div>
+
+              <div class="action-bar">
+                <button type="button" class="btn-primary" id="btn-economy-search">뉴스 검색</button>
+                <button type="button" class="btn-secondary" id="btn-economy-briefing">브리핑 생성</button>
+              </div>
+              <div id="economy-status" class="muted"></div>
+            </div>
+
+            <h2 class="section-title">뉴스 피드</h2>
+            <div id="economy-feed" class="feed-list"></div>
+
+            <h2 class="section-title">오늘의 브리핑</h2>
+            <div class="widget">
+              <pre class="out" id="economy-briefing">(브리핑 없음)</pre>
+            </div>
           </div>
+
+          <aside class="sidebar">
+            <div class="widget">
+              <h2 class="section-title">출처 분포</h2>
+              <div id="economy-signals" class="muted">뉴스 검색 후 집계됩니다.</div>
+            </div>
+            <div class="widget">
+              <h2 class="section-title">사용 안내</h2>
+              <div class="muted">
+                1) 뉴스 검색으로 최신 이슈를 모읍니다.<br />
+                2) 브리핑 생성을 누르면 핵심 키워드와 시사점이 정리됩니다.<br />
+                3) 키워드를 바꿔 테마별 브리핑을 반복 확인하세요.
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
     </div>
+
+    <script type="module">
+      const $ = (id) => document.getElementById(id);
+      const state = { results: [], briefing: "" };
+
+      function esc(value) {
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function escAttr(value) {
+        return String(value).replace(/"/g, "&quot;");
+      }
+
+      function setStatus(message, isErr = false) {
+        const el = $("economy-status");
+        el.textContent = message;
+        el.className = isErr ? "err" : "ok";
+      }
+
+      async function api(path, body) {
+        const res = await fetch(`/api${path}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const detail = data.detail || data.message || JSON.stringify(data);
+          throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        }
+        return data;
+      }
+
+      function renderFeed() {
+        const feed = $("economy-feed");
+        if (!state.results.length) {
+          feed.innerHTML = '<div class="empty-feed">뉴스 검색을 실행하면 경제 기사 목록이 표시됩니다.</div>';
+          return;
+        }
+        feed.innerHTML = state.results
+          .map((row, i) => {
+            const source = row.source || "뉴스";
+            const published = row.pubDate || "";
+            return `<article class="feed-post">
+              <div class="post-rail"><span class="post-rank-num">${i + 1}</span></div>
+              <div class="post-main">
+                <h3 class="post-title"><a href="${escAttr(row.link || "#")}" target="_blank" rel="noopener">${esc(row.title || "(제목 없음)")}</a></h3>
+                <div class="post-meta">
+                  <span>${esc(source)}</span>
+                  <span class="flair">${esc(published || "발행시각 없음")}</span>
+                </div>
+                <p class="post-excerpt">${esc(row.description || "")}</p>
+                <a class="post-footer-link" href="${escAttr(row.link || "#")}" target="_blank" rel="noopener">기사 원문 보기</a>
+              </div>
+            </article>`;
+          })
+          .join("");
+      }
+
+      function renderSignals() {
+        const el = $("economy-signals");
+        if (!state.results.length) {
+          el.textContent = "뉴스 검색 후 집계됩니다.";
+          el.className = "muted";
+          return;
+        }
+        const sourceCount = {};
+        state.results.forEach((row) => {
+          const source = row.source || "뉴스";
+          sourceCount[source] = (sourceCount[source] || 0) + 1;
+        });
+        const rows = Object.entries(sourceCount)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 6);
+        el.className = "";
+        el.innerHTML = rows
+          .map(([name, count]) => `<div class="insight-item"><strong>${esc(name)}</strong><div class="muted">${count}건</div></div>`)
+          .join("");
+      }
+
+      function renderBriefing() {
+        $("economy-briefing").textContent = state.briefing || "(브리핑 없음)";
+      }
+
+      async function runSearch() {
+        const keyword = $("economy-keyword").value.trim();
+        const sort = $("economy-sort").value;
+        if (!keyword) {
+          setStatus("브리핑 키워드를 입력하세요.", true);
+          return;
+        }
+        setStatus("경제 뉴스 검색 중…");
+        try {
+          const data = await api("/economy/search", { keyword, sort });
+          state.results = data.results || [];
+          state.briefing = "";
+          renderFeed();
+          renderSignals();
+          renderBriefing();
+          setStatus(`완료 · ${state.results.length}건 · ${data.sort_label || ""}`);
+        } catch (error) {
+          setStatus(error.message, true);
+        }
+      }
+
+      async function runBriefing() {
+        const keyword = $("economy-keyword").value.trim();
+        const sort = $("economy-sort").value;
+        if (!keyword) {
+          setStatus("브리핑 키워드를 입력하세요.", true);
+          return;
+        }
+        setStatus("브리핑 생성 중…");
+        try {
+          const data = await api("/economy/briefing", { keyword, sort, results: state.results });
+          state.results = data.results || state.results;
+          state.briefing = data.briefing || "";
+          renderFeed();
+          renderSignals();
+          renderBriefing();
+          setStatus(`브리핑 완료 · ${data.count || state.results.length}건 기준`);
+        } catch (error) {
+          setStatus(error.message, true);
+        }
+      }
+
+      $("btn-economy-search").addEventListener("click", runSearch);
+      $("btn-economy-briefing").addEventListener("click", runBriefing);
+
+      renderFeed();
+      renderSignals();
+      renderBriefing();
+    </script>
   </body>
 </html>
