@@ -207,6 +207,223 @@ def build_economy_briefing(topic: str, results: list[dict[str, Any]]) -> str:
     )
 
 
+def _wind_feel_desc(speed_mps: float) -> str:
+    if speed_mps < 2:
+        return "거의 바람이 느껴지지 않아요."
+    if speed_mps < 5:
+        return "산들바람 수준으로 가볍게 느껴져요."
+    if speed_mps < 9:
+        return "우산/머리카락이 눈에 띄게 흔들리는 정도예요."
+    if speed_mps < 14:
+        return "걷는 동안 바람 저항이 분명하게 느껴져요."
+    return "강한 바람으로 체감이 크게 떨어질 수 있어요."
+
+
+def _rain_feel_desc(precip_mm: float) -> str:
+    if precip_mm <= 0:
+        return "비 예보가 거의 없는 상태예요."
+    if precip_mm < 1:
+        return "이슬비 수준으로 우산 없이도 버틸 수 있는 경우가 많아요."
+    if precip_mm < 5:
+        return "약한 비로, 이동 시 작은 우산이 있으면 충분해요."
+    if precip_mm < 15:
+        return "중간 강도의 비로, 야외 활동이 불편해질 수 있어요."
+    return "강한 비 수준이라 외출 시 방수 대비가 꼭 필요해요."
+
+
+def _weather_icon(condition: str, is_day: bool = True) -> str:
+    text = (condition or "").lower()
+    if any(k in text for k in ["thunder", "뇌우"]):
+        return "⛈️"
+    if any(k in text for k in ["snow", "눈", "sleet"]):
+        return "🌨️"
+    if any(k in text for k in ["rain", "비", "drizzle", "shower"]):
+        return "🌧️"
+    if any(k in text for k in ["fog", "mist", "안개", "haze"]):
+        return "🌫️"
+    if any(k in text for k in ["cloud", "흐림", "구름"]):
+        return "⛅" if is_day else "☁️"
+    if any(k in text for k in ["sun", "clear", "맑"]):
+        return "☀️" if is_day else "🌙"
+    return "🌤️"
+
+
+def _to_local_time_label(iso_time: str) -> str:
+    try:
+        # open-meteo hourly.time 형식: YYYY-MM-DDTHH:MM
+        dt = datetime.strptime(iso_time, "%Y-%m-%dT%H:%M")
+        return dt.strftime("%H:%M")
+    except Exception:
+        return iso_time
+
+
+async def geocode_city(query: str, count: int = 8) -> list[dict[str, Any]]:
+    url = "https://geocoding-api.open-meteo.com/v1/search"
+    params = {"name": query, "count": count, "language": "ko", "format": "json"}
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        payload = response.json()
+
+    out: list[dict[str, Any]] = []
+    for row in payload.get("results", []) or []:
+        admin_bits = [row.get("admin1"), row.get("admin2"), row.get("country")]
+        admin_label = ", ".join([x for x in admin_bits if x])
+        out.append(
+            {
+                "name": row.get("name", ""),
+                "latitude": row.get("latitude"),
+                "longitude": row.get("longitude"),
+                "timezone": row.get("timezone", "Asia/Seoul"),
+                "country": row.get("country", ""),
+                "admin": admin_label,
+            }
+        )
+    return out
+
+
+async def fetch_weather_now(latitude: float, longitude: float, timezone: str = "Asia/Seoul") -> dict[str, Any]:
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "timezone": timezone,
+        "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation,rain,showers,snowfall",
+        "hourly": "weather_code,temperature_2m,wind_speed_10m,precipitation_probability",
+        "forecast_days": 1,
+    }
+    async with httpx.AsyncClient(timeout=25) as client:
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        payload = response.json()
+
+    current = payload.get("current", {})
+    hourly = payload.get("hourly", {})
+    now_time = current.get("time", "")
+    current_hour = now_time[11:13] if len(now_time) >= 13 else "12"
+    is_day = 7 <= int(current_hour) <= 18 if current_hour.isdigit() else True
+
+    weather_code = str(current.get("weather_code", ""))
+    weather_map = {
+        "0": "맑음",
+        "1": "대체로 맑음",
+        "2": "부분적으로 흐림",
+        "3": "흐림",
+        "45": "안개",
+        "48": "짙은 안개",
+        "51": "약한 이슬비",
+        "53": "이슬비",
+        "55": "강한 이슬비",
+        "61": "약한 비",
+        "63": "비",
+        "65": "강한 비",
+        "71": "약한 눈",
+        "73": "눈",
+        "75": "강한 눈",
+        "80": "소나기",
+        "81": "강한 소나기",
+        "82": "매우 강한 소나기",
+        "95": "뇌우",
+    }
+    condition = weather_map.get(weather_code, f"코드 {weather_code}")
+
+    wind_speed = float(current.get("wind_speed_10m", 0.0) or 0.0)
+    precipitation = float(current.get("precipitation", 0.0) or 0.0)
+    rain = float(current.get("rain", 0.0) or 0.0)
+    showers = float(current.get("showers", 0.0) or 0.0)
+    snowfall = float(current.get("snowfall", 0.0) or 0.0)
+
+    timeline: list[dict[str, Any]] = []
+    times = hourly.get("time", []) or []
+    t2m = hourly.get("temperature_2m", []) or []
+    w10 = hourly.get("wind_speed_10m", []) or []
+    pprob = hourly.get("precipitation_probability", []) or []
+    wcode = hourly.get("weather_code", []) or []
+    for idx in range(min(8, len(times))):
+        code = str(wcode[idx]) if idx < len(wcode) else "0"
+        cond = weather_map.get(code, f"코드 {code}")
+        hour = times[idx]
+        timeline.append(
+            {
+                "time": _to_local_time_label(hour),
+                "temperature_c": t2m[idx] if idx < len(t2m) else None,
+                "wind_mps": w10[idx] if idx < len(w10) else None,
+                "precip_probability": pprob[idx] if idx < len(pprob) else None,
+                "condition": cond,
+                "icon": _weather_icon(cond, is_day=True),
+            }
+        )
+
+    return {
+        "current": {
+            "time": now_time,
+            "condition": condition,
+            "icon": _weather_icon(condition, is_day=is_day),
+            "temperature_c": current.get("temperature_2m"),
+            "feels_like_c": current.get("apparent_temperature"),
+            "wind_mps": wind_speed,
+            "wind_feel": _wind_feel_desc(wind_speed),
+            "precipitation_mm": precipitation,
+            "rain_mm": rain,
+            "showers_mm": showers,
+            "snowfall_cm": snowfall,
+            "rain_feel": _rain_feel_desc(precipitation),
+        },
+        "timeline": timeline,
+    }
+
+
+async def build_weather_briefing_for_regions(regions: list[str]) -> dict[str, Any]:
+    cleaned = [r.strip() for r in regions if r and r.strip()]
+    if not cleaned:
+        raise ValueError("조회할 지역명이 비어 있습니다.")
+
+    items: list[dict[str, Any]] = []
+    for query in cleaned:
+        cands = await geocode_city(query, count=1)
+        if not cands:
+            items.append(
+                {
+                    "region_query": query,
+                    "ok": False,
+                    "error": "지역을 찾지 못했습니다.",
+                }
+            )
+            continue
+        loc = cands[0]
+        weather = await fetch_weather_now(loc["latitude"], loc["longitude"], loc.get("timezone", "Asia/Seoul"))
+        items.append(
+            {
+                "region_query": query,
+                "ok": True,
+                "location": loc,
+                "weather": weather,
+            }
+        )
+
+    successful = [x for x in items if x.get("ok")]
+    if not successful:
+        return {"items": items, "briefing": "조회 가능한 지역이 없어 날씨 브리핑을 만들지 못했습니다."}
+
+    lines = ["### 날씨 데일리 브리핑", ""]
+    for row in successful:
+        loc = row["location"]
+        cur = row["weather"]["current"]
+        lines.append(
+            f"- **{loc.get('name')}** {cur.get('icon')} {cur.get('condition')} · "
+            f"{cur.get('temperature_c')}°C (체감 {cur.get('feels_like_c')}°C)"
+        )
+        lines.append(
+            f"  - 바람: {cur.get('wind_mps')} m/s — {cur.get('wind_feel')}"
+        )
+        lines.append(
+            f"  - 강수: {cur.get('precipitation_mm')} mm/h "
+            f"(비 {cur.get('rain_mm')} · 소나기 {cur.get('showers_mm')} · 눈 {cur.get('snowfall_cm')}) — {cur.get('rain_feel')}"
+        )
+
+    return {"items": items, "briefing": "\n".join(lines)}
+
+
 def extract_keywords(text: str, top_k: int = 6) -> list[str]:
     tokens = re.findall(r"[가-힣A-Za-z0-9]{2,}", text.lower())
     filtered = [t for t in tokens if t not in KOREAN_STOPWORDS and not t.isdigit()]

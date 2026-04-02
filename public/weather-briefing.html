@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#1a1a1a" />
+    <title>날씨 데일리 브리핑 · 우아한빅토리 스튜디오</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=Plus+Jakarta+Sans:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <a href="/" class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-text">
+            <span class="brand-name">우아한빅토리 스튜디오</span>
+            <span class="brand-sub">검색 · 분석 · 초안 · 한 화면에서</span>
+          </span>
+        </a>
+      </div>
+    </header>
+
+    <div class="community-strip" aria-hidden="true">
+      <div class="community-strip-inner">
+        <span class="sort-pill is-on">BEST</span>
+        <span class="sort-pill">HOT</span>
+        <span class="sort-pill">NEW</span>
+        <span class="community-dot" aria-hidden="true">·</span>
+        <span class="community-crumb" translate="no">
+          <strong class="community-name-ko">우아한빅토리</strong>
+          <span class="community-dot crumb-sep" aria-hidden="true">·</span>
+          <span class="community-tagline">스튜디오</span>
+        </span>
+      </div>
+    </div>
+
+    <div class="body-shell">
+      <nav class="left-nav" aria-label="주요 메뉴">
+        <p class="left-nav-heading">탐색</p>
+        <a href="/" class="nav-item">
+          <span class="nav-icon" aria-hidden="true">⌂</span>
+          <span class="nav-label">인기 블로그 분석 및 요약</span>
+        </a>
+        <a href="/economy-briefing" class="nav-item">
+          <span class="nav-icon" aria-hidden="true">▤</span>
+          <span class="nav-label">경제 데일리 브리핑</span>
+        </a>
+        <a href="/weather-briefing" class="nav-item is-active">
+          <span class="nav-icon" aria-hidden="true">☁</span>
+          <span class="nav-label">날씨 데일리 브리핑</span>
+        </a>
+      </nav>
+
+      <div class="layout-main">
+        <div class="page-wrap">
+          <div class="feed-column">
+            <div class="create-card">
+              <label for="weather-regions">지역 목록 (쉼표 구분)</label>
+              <input
+                id="weather-regions"
+                type="text"
+                value="서울, 부산, 대구, 광주, 제주"
+                placeholder="예: 서울, 인천, 수원, 대전"
+                autocomplete="off"
+              />
+
+              <div class="action-bar">
+                <button type="button" class="btn-primary" id="btn-weather-search">지역별 실시간 검색</button>
+                <button type="button" class="btn-secondary" id="btn-weather-briefing">브리핑 생성</button>
+              </div>
+              <div id="weather-status" class="muted"></div>
+            </div>
+
+            <h2 class="section-title">지역별 실시간 날씨</h2>
+            <div id="weather-feed" class="feed-list"></div>
+
+            <h2 class="section-title">오늘의 날씨 브리핑</h2>
+            <div class="widget">
+              <pre class="out" id="weather-briefing">(브리핑 없음)</pre>
+            </div>
+          </div>
+
+          <aside class="sidebar">
+            <div class="widget">
+              <h2 class="section-title">체감 설명 기준</h2>
+              <div class="muted">
+                <strong>바람 강도(m/s)</strong><br />
+                0~2: 거의 무풍 · 2~5: 산들바람 · 5~9: 우산 흔들림 · 9~14: 보행 저항 · 14+: 강풍<br /><br />
+                <strong>강수량(mm/h)</strong><br />
+                0: 비 없음 · 0~1: 이슬비 · 1~5: 약한 비 · 5~15: 중간 비 · 15+: 강한 비
+              </div>
+            </div>
+            <div class="widget">
+              <h2 class="section-title">시간대 예보</h2>
+              <div id="weather-timeline" class="muted">실시간 검색 후 지역별 8시간 예보가 표시됩니다.</div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      const $ = (id) => document.getElementById(id);
+      const state = { items: [], briefing: "" };
+
+      function esc(value) {
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function setStatus(message, isErr = false) {
+        const el = $("weather-status");
+        el.textContent = message;
+        el.className = isErr ? "err" : "ok";
+      }
+
+      function parseRegions() {
+        return $("weather-regions")
+          .value.split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+
+      async function api(path, body) {
+        const res = await fetch(`/api${path}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const detail = data.detail || data.message || JSON.stringify(data);
+          throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        }
+        return data;
+      }
+
+      function renderFeed() {
+        const feed = $("weather-feed");
+        if (!state.items.length) {
+          feed.innerHTML = '<div class="empty-feed">지역별 실시간 검색을 실행하면 날씨 카드가 표시됩니다.</div>';
+          return;
+        }
+        feed.innerHTML = state.items
+          .map((row, idx) => {
+            if (!row.ok) {
+              return `<article class="feed-post">
+                <div class="post-rail"><span class="post-rank-num">${idx + 1}</span></div>
+                <div class="post-main">
+                  <h3 class="post-title">${esc(row.region_query || "지역")}</h3>
+                  <p class="post-excerpt">조회 실패: ${esc(row.error || "알 수 없는 오류")}</p>
+                </div>
+              </article>`;
+            }
+            const loc = row.location || {};
+            const cur = (row.weather || {}).current || {};
+            return `<article class="feed-post">
+              <div class="post-rail"><span class="post-rank-num">${idx + 1}</span></div>
+              <div class="post-main">
+                <h3 class="post-title">${esc(loc.name || row.region_query)} ${esc(cur.icon || "🌤️")} ${esc(cur.condition || "")}</h3>
+                <div class="post-meta">
+                  <span>${esc(loc.admin || loc.country || "")}</span>
+                  <span class="flair">${esc((cur.temperature_c ?? "-") + "°C / 체감 " + (cur.feels_like_c ?? "-") + "°C")}</span>
+                </div>
+                <p class="post-excerpt">
+                  바람 ${esc(String(cur.wind_mps ?? "-"))} m/s · ${esc(cur.wind_feel || "")}<br />
+                  강수 ${esc(String(cur.precipitation_mm ?? "-"))} mm/h · ${esc(cur.rain_feel || "")}
+                </p>
+              </div>
+            </article>`;
+          })
+          .join("");
+      }
+
+      function renderTimeline() {
+        const el = $("weather-timeline");
+        const okItems = state.items.filter((x) => x.ok);
+        if (!okItems.length) {
+          el.textContent = "실시간 검색 후 지역별 8시간 예보가 표시됩니다.";
+          el.className = "muted";
+          return;
+        }
+        el.className = "";
+        el.innerHTML = okItems
+          .slice(0, 3)
+          .map((row) => {
+            const name = row.location?.name || row.region_query || "지역";
+            const lines = (row.weather?.timeline || [])
+              .slice(0, 8)
+              .map(
+                (t) =>
+                  `<div class="insight-item"><strong>${esc(t.time)} ${esc(t.icon || "🌤️")} ${esc(t.condition || "")}</strong><div class="muted">${esc(
+                    `${t.temperature_c ?? "-"}°C · 바람 ${t.wind_mps ?? "-"} m/s · 강수확률 ${t.precip_probability ?? "-"}%`
+                  )}</div></div>`
+              )
+              .join("");
+            return `<div style="margin-bottom:0.8rem"><strong>${esc(name)}</strong>${lines}</div>`;
+          })
+          .join("");
+      }
+
+      function renderBriefing() {
+        $("weather-briefing").textContent = state.briefing || "(브리핑 없음)";
+      }
+
+      async function runSearch() {
+        const regions = parseRegions();
+        if (!regions.length) {
+          setStatus("지역을 1개 이상 입력하세요.", true);
+          return;
+        }
+        setStatus("지역별 실시간 날씨 조회 중…");
+        try {
+          const data = await api("/weather/search", { regions });
+          state.items = data.items || [];
+          state.briefing = "";
+          renderFeed();
+          renderTimeline();
+          renderBriefing();
+          setStatus(`완료 · ${state.items.length}개 지역`);
+        } catch (error) {
+          setStatus(error.message, true);
+        }
+      }
+
+      async function runBriefing() {
+        const regions = parseRegions();
+        if (!regions.length) {
+          setStatus("지역을 1개 이상 입력하세요.", true);
+          return;
+        }
+        setStatus("날씨 브리핑 생성 중…");
+        try {
+          const data = await api("/weather/briefing", { regions });
+          state.items = data.items || [];
+          state.briefing = data.briefing || "";
+          renderFeed();
+          renderTimeline();
+          renderBriefing();
+          setStatus("날씨 브리핑 생성 완료");
+        } catch (error) {
+          setStatus(error.message, true);
+        }
+      }
+
+      $("btn-weather-search").addEventListener("click", runSearch);
+      $("btn-weather-briefing").addEventListener("click", runBriefing);
+
+      renderFeed();
+      renderTimeline();
+      renderBriefing();
+    </script>
+  </body>
+</html>
