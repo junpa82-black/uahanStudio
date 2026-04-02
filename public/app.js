@@ -30,19 +30,26 @@ async function api(path, body) {
 function renderFeed() {
   const feed = $("feed");
   if (!state.results.length) {
-    feed.innerHTML = '<div class="panel muted">검색 결과가 여기에 표시됩니다.</div>';
+    feed.innerHTML =
+      '<div class="empty-feed">검색을 실행하면 네이버 블로그 결과가 여기에 나타납니다.</div>';
     return;
   }
   feed.innerHTML = state.results
     .map((row, i) => {
-      const rank = row.ranking_basis || "관련도(sim)";
-      return `<div class="feed-card">
-        <strong>${i + 1}. ${escapeHtml(row.title)}</strong>
-        <div class="muted">${escapeHtml(row.bloggername || "")} · ${escapeHtml(row.postdate || "")}</div>
-        <p>${escapeHtml(row.description || "")}</p>
-        <div class="muted">랭킹 근거: ${escapeHtml(rank)}</div>
-        <a href="${escapeAttr(row.link)}" target="_blank" rel="noopener">원본 링크</a>
-      </div>`;
+      const rank = row.ranking_basis || "관련도";
+      const author = [row.bloggername, row.postdate].filter(Boolean).join(" · ");
+      return `<article class="feed-post">
+        <div class="post-rail"><span class="post-rank-num">${i + 1}</span></div>
+        <div class="post-main">
+          <h3 class="post-title"><a href="${escapeAttr(row.link)}" target="_blank" rel="noopener">${escapeHtml(row.title)}</a></h3>
+          <div class="post-meta">
+            <span>${escapeHtml(author || "블로그")}</span>
+            <span class="flair">${escapeHtml(rank)}</span>
+          </div>
+          <p class="post-excerpt">${escapeHtml(row.description || "")}</p>
+          <a class="post-footer-link" href="${escapeAttr(row.link)}" target="_blank" rel="noopener">원문 보기</a>
+        </div>
+      </article>`;
     })
     .join("");
 }
@@ -62,7 +69,7 @@ function escapeAttr(s) {
 function renderTrending() {
   const el = $("trending");
   if (!state.analyzed.length) {
-    el.innerHTML = '<span class="muted">—</span>';
+    el.innerHTML = '<span class="muted">분석 후 키워드가 여기 표시됩니다.</span>';
     return;
   }
   el.innerHTML = state.analyzed
@@ -78,18 +85,19 @@ function renderAnalysis() {
   const el = $("analysis");
   if (!state.analyzed.length) {
     el.textContent = "생성·요약 실행 후 표시됩니다.";
-    el.className = "panel muted";
+    el.className = "widget muted";
     return;
   }
-  el.className = "panel";
+  el.className = "widget";
   el.innerHTML = state.analyzed
     .map(
       (row, i) =>
-        `<div style="margin-bottom:0.75rem"><strong>${i + 1}. ${escapeHtml(row.title)}</strong>
-        <div class="muted"><a href="${escapeAttr(row.link)}" target="_blank">링크</a></div>
-        <div>키워드: ${escapeHtml((row.keywords || []).join(", ") || "없음")}</div>
-        <div class="muted">${escapeHtml((row.summary || "").slice(0, 400))}</div>
-        ${row.analysis_source === "description_fallback" ? '<div class="muted">※ description 대체 분석</div>' : ""}
+        `<div class="analysis-block">
+        <strong>${i + 1}. ${escapeHtml(row.title)}</strong>
+        <div class="muted" style="margin:0.25rem 0"><a href="${escapeAttr(row.link)}" target="_blank" rel="noopener">링크</a></div>
+        <div style="font-size:0.875rem">키워드: ${escapeHtml((row.keywords || []).join(", ") || "없음")}</div>
+        <div class="muted" style="margin-top:0.35rem;font-size:0.875rem">${escapeHtml((row.summary || "").slice(0, 400))}</div>
+        ${row.analysis_source === "description_fallback" ? '<div class="muted" style="margin-top:0.35rem;font-size:0.8rem">※ description 대체 분석</div>' : ""}
         </div>`
     )
     .join("");
@@ -117,7 +125,7 @@ $("btn-search").addEventListener("click", async () => {
     renderTrending();
     renderAnalysis();
     renderDraft();
-    $("summary").textContent = "요약하기 버튼으로 생성합니다.";
+    $("summary").textContent = "요약 버튼으로 생성합니다.";
     setStatus(`완료 · ${state.results.length}건 · ${data.sort_label || ""}`);
   } catch (e) {
     setStatus(e.message, true);

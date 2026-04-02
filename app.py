@@ -85,7 +85,7 @@ def render_right_panel(analyzed: list) -> None:
 def run() -> None:
     st.set_page_config(page_title="Naver MCP Blog Studio", layout="wide")
     inject_dashboard_styles()
-    st.markdown("## 우아한블로그 스튜디오")
+    st.markdown("## 우아한빅토리 스튜디오")
 
     if "results" not in st.session_state:
         st.session_state.results = []

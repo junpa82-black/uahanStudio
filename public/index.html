@@ -2,23 +2,67 @@
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>우아한블로그 스튜디오</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#1a1a1a" />
+    <title>우아한빅토리 스튜디오</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=Plus+Jakarta+Sans:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header>
-      <h1>우아한블로그 스튜디오</h1>
+    <header class="site-header">
+      <div class="header-inner">
+        <a href="/" class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-text">
+            <span class="brand-name">우아한빅토리 스튜디오</span>
+            <span class="brand-sub">검색 · 분석 · 초안 · 한 화면에서</span>
+          </span>
+        </a>
+      </div>
     </header>
 
-    <div class="layout">
-      <main>
-        <div class="panel">
-          <label for="keyword">키워드 입력</label>
-          <input id="keyword" type="text" placeholder="예: 제주도 가족여행" />
+    <div class="community-strip" aria-hidden="true">
+      <div class="community-strip-inner">
+        <span class="sort-pill is-on">BEST</span>
+        <span class="sort-pill">HOT</span>
+        <span class="sort-pill">NEW</span>
+        <span class="community-dot" aria-hidden="true">·</span>
+        <span class="community-crumb" translate="no">
+          <strong class="community-name-ko">우아한빅토리</strong>
+          <span class="community-dot crumb-sep" aria-hidden="true">·</span>
+          <span class="community-tagline">스튜디오</span>
+        </span>
+      </div>
+    </div>
 
-          <div class="row" style="margin-top: 0.75rem">
-            <div style="flex: 1; min-width: 140px">
+    <div class="body-shell">
+      <nav class="left-nav" aria-label="주요 메뉴">
+        <p class="left-nav-heading">탐색</p>
+        <a href="/" class="nav-item is-active">
+          <span class="nav-icon" aria-hidden="true">⌂</span>
+          <span class="nav-label">키워드 요약</span>
+        </a>
+        <a href="/economy-briefing" class="nav-item">
+          <span class="nav-icon" aria-hidden="true">▤</span>
+          <span class="nav-label">경제 데일리 브리핑</span>
+        </a>
+      </nav>
+
+      <div class="layout-main">
+    <div class="page-wrap">
+      <div class="feed-column">
+        <div class="create-card">
+          <label for="keyword">키워드</label>
+          <input id="keyword" type="text" placeholder="예: 제주도 가족여행" autocomplete="off" />
+
+          <div class="field-row">
+            <div>
               <label for="tone">생성 스타일</label>
               <select id="tone">
                 <option value="전문가톤">전문가톤</option>
@@ -26,46 +70,49 @@
                 <option value="브랜디드톤">브랜디드톤</option>
               </select>
             </div>
-            <div style="flex: 1; min-width: 140px">
+            <div>
               <label for="sort">검색 정렬</label>
               <select id="sort">
-                <option value="sim">관련도순 (sim)</option>
-                <option value="date">최신순 (date)</option>
+                <option value="sim">관련도순</option>
+                <option value="date">최신순</option>
               </select>
             </div>
           </div>
 
-          <div class="row">
-            <button class="primary" id="btn-search">검색 실행</button>
-            <button id="btn-generate">생성하기</button>
-            <button id="btn-summarize">요약하기</button>
-            <button id="btn-images">이미지 생성 및 삽입</button>
-            <button id="btn-download">다운로드 (md + 이미지)</button>
+          <div class="action-bar">
+            <button type="button" class="btn-primary" id="btn-search">검색</button>
+            <button type="button" class="btn-secondary" id="btn-generate">생성</button>
+            <button type="button" class="btn-secondary" id="btn-summarize">요약</button>
+            <button type="button" class="btn-secondary" id="btn-images">이미지</button>
+            <button type="button" class="btn-secondary" id="btn-download">다운로드</button>
           </div>
           <div id="status" class="muted"></div>
         </div>
 
-        <h2>Feed</h2>
-        <div id="feed"></div>
+        <h2 class="section-title">피드</h2>
+        <div id="feed" class="feed-list"></div>
 
-        <h2>Firecrawl 분석 결과</h2>
-        <div id="analysis" class="panel muted">생성·요약 실행 후 표시됩니다.</div>
+        <h2 class="section-title">분석 결과</h2>
+        <div id="analysis" class="widget muted">생성·요약 실행 후 표시됩니다.</div>
 
-        <h2>생성된 블로그 초안</h2>
-        <div class="panel">
+        <h2 class="section-title">생성된 초안</h2>
+        <div class="widget">
           <pre class="out" id="draft">(없음)</pre>
         </div>
-      </main>
+      </div>
 
-      <aside>
-        <h2>Trending Insights</h2>
-        <div id="trending" class="panel"></div>
-
-        <h2>Clear Thought 요약</h2>
-        <div class="panel">
-          <div id="summary" class="muted">요약하기 버튼으로 생성합니다.</div>
+      <aside class="sidebar">
+        <div class="widget">
+          <h2 class="section-title">Trending</h2>
+          <div id="trending"></div>
+        </div>
+        <div class="widget">
+          <h2 class="section-title">Clear Thought 요약</h2>
+          <div id="summary" class="muted">요약 버튼으로 생성합니다.</div>
         </div>
       </aside>
+    </div>
+      </div>
     </div>
 
     <script src="/app.js"></script>
