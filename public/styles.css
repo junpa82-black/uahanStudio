@@ -561,6 +561,23 @@ textarea:focus {
   transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
+.mini-action {
+  min-height: 34px;
+  padding: 0 0.72rem;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  color: var(--text);
+}
+
+.mini-action:hover {
+  background: var(--canvas);
+}
+
 .action-bar button:active {
   transform: scale(0.97);
 }

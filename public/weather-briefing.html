@@ -71,12 +71,35 @@
                 autocomplete="off"
               />
 
+              <div class="field-row">
+                <div>
+                  <label for="refresh-minutes">자동 새로고침(분)</label>
+                  <select id="refresh-minutes">
+                    <option value="0">꺼짐</option>
+                    <option value="5">5분</option>
+                    <option value="10">10분</option>
+                    <option value="30">30분</option>
+                    <option value="60">60분</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="favorite-name">즐겨찾기 이름</label>
+                  <input id="favorite-name" type="text" placeholder="예: 출근 루트" autocomplete="off" />
+                </div>
+              </div>
+
               <div class="action-bar">
                 <button type="button" class="btn-primary" id="btn-weather-search">지역별 실시간 검색</button>
                 <button type="button" class="btn-secondary" id="btn-weather-briefing">브리핑 생성</button>
+                <button type="button" class="btn-secondary" id="btn-refresh-toggle">자동 새로고침 시작</button>
+                <button type="button" class="btn-secondary" id="btn-favorite-save">즐겨찾기 저장</button>
               </div>
+              <div id="weather-refresh-status" class="muted">자동 새로고침 꺼짐</div>
               <div id="weather-status" class="muted"></div>
             </div>
+
+            <h2 class="section-title">즐겨찾기 지역</h2>
+            <div id="weather-favorites" class="widget muted">저장된 즐겨찾기가 없습니다.</div>
 
             <h2 class="section-title">지역별 실시간 날씨</h2>
             <div id="weather-feed" class="feed-list"></div>
@@ -108,7 +131,22 @@
 
     <script type="module">
       const $ = (id) => document.getElementById(id);
-      const state = { items: [], briefing: "" };
+      const state = {
+        items: [],
+        briefing: "",
+        favorites: [],
+        refreshTimerId: null,
+        refreshMinutes: 0,
+      };
+      const FAVORITES_KEY = "uahanStudio.weather.favorites.v1";
+
+      function serializeRegions(regions) {
+        return regions.join(", ");
+      }
+
+      function normalizeRegions(regions) {
+        return regions.map((x) => x.trim()).filter(Boolean);
+      }
 
       function esc(value) {
         return String(value)
@@ -125,10 +163,10 @@
       }
 
       function parseRegions() {
-        return $("weather-regions")
+        return normalizeRegions(
+          $("weather-regions")
           .value.split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
+        );
       }
 
       async function api(path, body) {
@@ -143,6 +181,107 @@
           throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
         }
         return data;
+      }
+
+      function renderFavorites() {
+        const el = $("weather-favorites");
+        if (!state.favorites.length) {
+          el.className = "widget muted";
+          el.textContent = "저장된 즐겨찾기가 없습니다.";
+          return;
+        }
+        el.className = "widget";
+        el.innerHTML = state.favorites
+          .map(
+            (fav) =>
+              `<div class="insight-item">
+                <strong>${esc(fav.name)}</strong>
+                <div class="muted">${esc(fav.regions.join(", "))}</div>
+                <div style="margin-top:0.35rem;display:flex;gap:0.4rem;flex-wrap:wrap">
+                  <button type="button" class="btn-secondary fav-apply" data-id="${esc(fav.id)}" style="min-height:34px;padding:0 0.75rem;border-radius:999px">적용</button>
+                  <button type="button" class="btn-secondary fav-delete" data-id="${esc(fav.id)}" style="min-height:34px;padding:0 0.75rem;border-radius:999px">삭제</button>
+                </div>
+              </div>`
+          )
+          .join("");
+      }
+
+      function loadFavorites() {
+        try {
+          const raw = localStorage.getItem(FAVORITES_KEY);
+          if (!raw) {
+            state.favorites = [];
+            return;
+          }
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) {
+            state.favorites = [];
+            return;
+          }
+          state.favorites = parsed
+            .map((row) => ({
+              id: String(row.id || ""),
+              name: String(row.name || ""),
+              regions: normalizeRegions(Array.isArray(row.regions) ? row.regions : []),
+            }))
+            .filter((row) => row.id && row.name && row.regions.length);
+        } catch {
+          state.favorites = [];
+        }
+      }
+
+      function saveFavorites() {
+        localStorage.setItem(FAVORITES_KEY, JSON.stringify(state.favorites));
+      }
+
+      function saveCurrentAsFavorite() {
+        const regions = parseRegions();
+        if (!regions.length) {
+          setStatus("즐겨찾기로 저장할 지역을 먼저 입력하세요.", true);
+          return;
+        }
+        const provided = $("favorite-name").value.trim();
+        const name = provided || `즐겨찾기 ${state.favorites.length + 1}`;
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        state.favorites.unshift({ id, name, regions });
+        state.favorites = state.favorites.slice(0, 20);
+        saveFavorites();
+        renderFavorites();
+        $("favorite-name").value = "";
+        setStatus(`즐겨찾기 저장 완료: ${name}`);
+      }
+
+      function removeFavorite(id) {
+        state.favorites = state.favorites.filter((row) => row.id !== id);
+        saveFavorites();
+        renderFavorites();
+      }
+
+      function applyFavorite(id) {
+        const found = state.favorites.find((row) => row.id === id);
+        if (!found) return;
+        $("weather-regions").value = serializeRegions(found.regions);
+        setStatus(`즐겨찾기 적용: ${found.name}`);
+      }
+
+      function getAlertBadges(cur) {
+        const out = [];
+        const wind = Number(cur.wind_mps || 0);
+        const precip = Number(cur.precipitation_mm || 0);
+        const snow = Number(cur.snowfall_cm || 0);
+        const condition = String(cur.condition || "");
+        if (wind >= 14) out.push({ label: "강풍 주의", level: "high" });
+        if (precip >= 15) out.push({ label: "호우 주의", level: "high" });
+        if (snow >= 2) out.push({ label: "폭설 주의", level: "high" });
+        if (condition.includes("뇌우")) out.push({ label: "뇌우 주의", level: "high" });
+        if (!out.length && (wind >= 9 || precip >= 5)) out.push({ label: "기상 유의", level: "mid" });
+        return out;
+      }
+
+      function badgeHtml(badge) {
+        const bg = badge.level === "high" ? "rgba(255,69,0,0.16)" : "rgba(255,153,0,0.16)";
+        const bd = badge.level === "high" ? "rgba(255,69,0,0.5)" : "rgba(255,153,0,0.45)";
+        return `<span class="flair" style="background:${bg};border-color:${bd}">${esc(badge.label)}</span>`;
       }
 
       function renderFeed() {
@@ -164,6 +303,7 @@
             }
             const loc = row.location || {};
             const cur = (row.weather || {}).current || {};
+            const badges = getAlertBadges(cur);
             return `<article class="feed-post">
               <div class="post-rail"><span class="post-rank-num">${idx + 1}</span></div>
               <div class="post-main">
@@ -171,6 +311,7 @@
                 <div class="post-meta">
                   <span>${esc(loc.admin || loc.country || "")}</span>
                   <span class="flair">${esc((cur.temperature_c ?? "-") + "°C / 체감 " + (cur.feels_like_c ?? "-") + "°C")}</span>
+                  ${badges.map((b) => badgeHtml(b)).join("")}
                 </div>
                 <p class="post-excerpt">
                   바람 ${esc(String(cur.wind_mps ?? "-"))} m/s · ${esc(cur.wind_feel || "")}<br />
@@ -213,13 +354,50 @@
         $("weather-briefing").textContent = state.briefing || "(브리핑 없음)";
       }
 
-      async function runSearch() {
-        const regions = parseRegions();
-        if (!regions.length) {
-          setStatus("지역을 1개 이상 입력하세요.", true);
+      function updateRefreshStatus(text) {
+        $("weather-refresh-status").textContent = text;
+      }
+
+      function stopAutoRefresh(showStatus = true) {
+        if (state.refreshTimerId) {
+          clearInterval(state.refreshTimerId);
+          state.refreshTimerId = null;
+        }
+        $("btn-refresh-toggle").textContent = "자동 새로고침 시작";
+        if (showStatus) updateRefreshStatus("자동 새로고침 꺼짐");
+      }
+
+      function startAutoRefresh() {
+        const mins = Number($("refresh-minutes").value || 0);
+        if (!mins) {
+          stopAutoRefresh();
           return;
         }
-        setStatus("지역별 실시간 날씨 조회 중…");
+        stopAutoRefresh(false);
+        state.refreshMinutes = mins;
+        const intervalMs = mins * 60 * 1000;
+        state.refreshTimerId = setInterval(() => {
+          runSearch(true);
+        }, intervalMs);
+        $("btn-refresh-toggle").textContent = "자동 새로고침 정지";
+        updateRefreshStatus(`자동 새로고침 켜짐 · ${mins}분마다 지역별 실시간 검색`);
+      }
+
+      function toggleAutoRefresh() {
+        if (state.refreshTimerId) {
+          stopAutoRefresh();
+          return;
+        }
+        startAutoRefresh();
+      }
+
+      async function runSearch(isAuto = false) {
+        const regions = parseRegions();
+        if (!regions.length) {
+          if (!isAuto) setStatus("지역을 1개 이상 입력하세요.", true);
+          return;
+        }
+        if (!isAuto) setStatus("지역별 실시간 날씨 조회 중…");
         try {
           const data = await api("/weather/search", { regions });
           state.items = data.items || [];
@@ -227,9 +405,14 @@
           renderFeed();
           renderTimeline();
           renderBriefing();
-          setStatus(`완료 · ${state.items.length}개 지역`);
+          if (!isAuto) setStatus(`완료 · ${state.items.length}개 지역`);
+          if (isAuto) {
+            updateRefreshStatus(
+              `자동 새로고침 켜짐 · ${state.refreshMinutes}분마다 · 마지막 갱신 ${new Date().toLocaleTimeString("ko-KR")}`
+            );
+          }
         } catch (error) {
-          setStatus(error.message, true);
+          if (!isAuto) setStatus(error.message, true);
         }
       }
 
@@ -255,6 +438,25 @@
 
       $("btn-weather-search").addEventListener("click", runSearch);
       $("btn-weather-briefing").addEventListener("click", runBriefing);
+      $("btn-refresh-toggle").addEventListener("click", toggleAutoRefresh);
+      $("btn-favorite-save").addEventListener("click", saveCurrentAsFavorite);
+      $("refresh-minutes").addEventListener("change", () => {
+        if (state.refreshTimerId) startAutoRefresh();
+      });
+      $("weather-favorites").addEventListener("click", (event) => {
+        const applyBtn = event.target.closest(".fav-apply");
+        if (applyBtn) {
+          applyFavorite(applyBtn.dataset.id || "");
+          return;
+        }
+        const delBtn = event.target.closest(".fav-delete");
+        if (delBtn) {
+          removeFavorite(delBtn.dataset.id || "");
+        }
+      });
+
+      loadFavorites();
+      renderFavorites();
 
       renderFeed();
       renderTimeline();
