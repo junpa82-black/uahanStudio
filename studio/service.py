@@ -5,6 +5,7 @@ import random
 import re
 from collections import Counter
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from html import unescape
 from pathlib import Path
 from typing import Any
@@ -87,6 +88,340 @@ async def search_blog_by_naver_mcp(query: str, display: int = 10, sort: str = "s
             }
         )
     return normalized
+
+
+def _format_naver_pub_date(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = parsedate_to_datetime(raw)
+        return parsed.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return raw
+
+
+async def search_news_by_naver_api(query: str, display: int = 12, sort: str = "date") -> list[dict[str, Any]]:
+    """네이버 뉴스 검색 API 직접 호출."""
+    client_id = _env("NAVER_CLIENT_ID")
+    client_secret = _env("NAVER_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise ValueError(
+            "NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET을 환경 변수에 설정해 주세요. "
+            "(Vercel: Project → Settings → Environment Variables)"
+        )
+
+    url = "https://openapi.naver.com/v1/search/news.json"
+    headers = {
+        "X-Naver-Client-Id": client_id,
+        "X-Naver-Client-Secret": client_secret,
+    }
+    params = {"query": query, "display": display, "start": 1, "sort": sort}
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        payload = response.json()
+
+    normalized = []
+    for item in payload.get("items", []):
+        source_link = (item.get("originallink") or "").strip()
+        naver_link = (item.get("link") or "").strip()
+        final_link = source_link or naver_link
+        source_name = "뉴스"
+        if source_link:
+            host = (urlparse(source_link).netloc or "").replace("www.", "")
+            source_name = host or source_name
+        normalized.append(
+            {
+                "title": strip_html(item.get("title", "")),
+                "description": strip_html(item.get("description", "")),
+                "link": final_link,
+                "originallink": source_link,
+                "naverlink": naver_link,
+                "source": source_name,
+                "pubDate": _format_naver_pub_date(item.get("pubDate", "")),
+            }
+        )
+    return normalized
+
+
+def _categorize_economy_article(text: str) -> str:
+    corpus = (text or "").lower()
+    rules = [
+        ("정책·금리", ["금리", "기준금리", "한국은행", "연준", "fomc", "물가", "cpi", "pce"]),
+        ("증시·투자", ["주가", "증시", "코스피", "코스닥", "나스닥", "s&p", "etf", "투자"]),
+        ("부동산", ["부동산", "주택", "아파트", "분양", "전세", "월세", "재건축"]),
+        ("환율·원자재", ["환율", "달러", "원화", "유가", "원유", "금값", "원자재"]),
+        ("기업·산업", ["실적", "매출", "영업이익", "반도체", "수출", "공급망", "기업"]),
+    ]
+    for category, keywords in rules:
+        if any(keyword in corpus for keyword in keywords):
+            return category
+    return "글로벌·기타"
+
+
+def build_economy_briefing(topic: str, results: list[dict[str, Any]]) -> str:
+    picked = results[:10]
+    if not picked:
+        return "분석할 뉴스가 없어 브리핑을 생성하지 못했습니다."
+
+    keyword_counter: Counter[str] = Counter()
+    category_counter: Counter[str] = Counter()
+    headline_lines: list[str] = []
+
+    for row in picked:
+        title = row.get("title", "").strip()
+        desc = row.get("description", "").strip()
+        source = row.get("source", "뉴스")
+        published = row.get("pubDate", "")
+        category = _categorize_economy_article(f"{title} {desc}")
+        category_counter.update([category])
+        keyword_counter.update(extract_keywords(f"{title} {desc}", top_k=5))
+        headline_lines.append(
+            f"- [{category}] {title}\n  - 출처: {source}"
+            + (f" · {published}" if published else "")
+        )
+
+    top_keywords = [k for k, _ in keyword_counter.most_common(8)]
+    top_categories = [f"{name} {count}건" for name, count in category_counter.most_common(3)]
+    dominant = category_counter.most_common(1)[0][0]
+    now_label = datetime.now().strftime("%Y-%m-%d %H:%M")
+    keyword_line = ", ".join(top_keywords) if top_keywords else "경제, 시장, 정책"
+    category_line = " / ".join(top_categories) if top_categories else "분류 데이터 부족"
+
+    insights = [
+        f"헤드라인 분포상 **{dominant}** 이슈 비중이 높아, 단기 뉴스 흐름이 해당 축에 집중되고 있습니다.",
+        "여러 기사에서 공통으로 등장한 키워드는 시장 참여자들이 현재 가장 민감하게 보는 변수로 해석할 수 있습니다.",
+        "실행 측면에서는 수치(금리·환율·지수) 업데이트를 확인한 뒤, 산업/기업 뉴스와 교차 검증하는 순서가 안전합니다.",
+    ]
+
+    return (
+        f"### 경제 데일리 브리핑: {topic}\n\n"
+        f"- 기준 시각: {now_label}\n"
+        f"- 핵심 키워드: {keyword_line}\n"
+        f"- 이슈 분포: {category_line}\n\n"
+        "#### 주요 헤드라인\n"
+        + "\n".join(headline_lines[:6])
+        + "\n\n#### 오늘의 시사점\n"
+        + "\n".join([f"{idx}. {line}" for idx, line in enumerate(insights, start=1)])
+    )
+
+
+def _wind_feel_desc(speed_mps: float) -> str:
+    if speed_mps < 2:
+        return "거의 바람이 느껴지지 않아요."
+    if speed_mps < 5:
+        return "산들바람 수준으로 가볍게 느껴져요."
+    if speed_mps < 9:
+        return "우산/머리카락이 눈에 띄게 흔들리는 정도예요."
+    if speed_mps < 14:
+        return "걷는 동안 바람 저항이 분명하게 느껴져요."
+    return "강한 바람으로 체감이 크게 떨어질 수 있어요."
+
+
+def _rain_feel_desc(precip_mm: float) -> str:
+    if precip_mm <= 0:
+        return "비 예보가 거의 없는 상태예요."
+    if precip_mm < 1:
+        return "이슬비 수준으로 우산 없이도 버틸 수 있는 경우가 많아요."
+    if precip_mm < 5:
+        return "약한 비로, 이동 시 작은 우산이 있으면 충분해요."
+    if precip_mm < 15:
+        return "중간 강도의 비로, 야외 활동이 불편해질 수 있어요."
+    return "강한 비 수준이라 외출 시 방수 대비가 꼭 필요해요."
+
+
+def _weather_icon(condition: str, is_day: bool = True) -> str:
+    text = (condition or "").lower()
+    if any(k in text for k in ["thunder", "뇌우"]):
+        return "⛈️"
+    if any(k in text for k in ["snow", "눈", "sleet"]):
+        return "🌨️"
+    if any(k in text for k in ["rain", "비", "drizzle", "shower"]):
+        return "🌧️"
+    if any(k in text for k in ["fog", "mist", "안개", "haze"]):
+        return "🌫️"
+    if any(k in text for k in ["cloud", "흐림", "구름"]):
+        return "⛅" if is_day else "☁️"
+    if any(k in text for k in ["sun", "clear", "맑"]):
+        return "☀️" if is_day else "🌙"
+    return "🌤️"
+
+
+def _to_local_time_label(iso_time: str) -> str:
+    try:
+        # open-meteo hourly.time 형식: YYYY-MM-DDTHH:MM
+        dt = datetime.strptime(iso_time, "%Y-%m-%dT%H:%M")
+        return dt.strftime("%H:%M")
+    except Exception:
+        return iso_time
+
+
+async def geocode_city(query: str, count: int = 8) -> list[dict[str, Any]]:
+    url = "https://geocoding-api.open-meteo.com/v1/search"
+    params = {"name": query, "count": count, "language": "ko", "format": "json"}
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        payload = response.json()
+
+    out: list[dict[str, Any]] = []
+    for row in payload.get("results", []) or []:
+        admin_bits = [row.get("admin1"), row.get("admin2"), row.get("country")]
+        admin_label = ", ".join([x for x in admin_bits if x])
+        out.append(
+            {
+                "name": row.get("name", ""),
+                "latitude": row.get("latitude"),
+                "longitude": row.get("longitude"),
+                "timezone": row.get("timezone", "Asia/Seoul"),
+                "country": row.get("country", ""),
+                "admin": admin_label,
+            }
+        )
+    return out
+
+
+async def fetch_weather_now(latitude: float, longitude: float, timezone: str = "Asia/Seoul") -> dict[str, Any]:
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "timezone": timezone,
+        "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation,rain,showers,snowfall",
+        "hourly": "weather_code,temperature_2m,wind_speed_10m,precipitation_probability",
+        "forecast_days": 1,
+    }
+    async with httpx.AsyncClient(timeout=25) as client:
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        payload = response.json()
+
+    current = payload.get("current", {})
+    hourly = payload.get("hourly", {})
+    now_time = current.get("time", "")
+    current_hour = now_time[11:13] if len(now_time) >= 13 else "12"
+    is_day = 7 <= int(current_hour) <= 18 if current_hour.isdigit() else True
+
+    weather_code = str(current.get("weather_code", ""))
+    weather_map = {
+        "0": "맑음",
+        "1": "대체로 맑음",
+        "2": "부분적으로 흐림",
+        "3": "흐림",
+        "45": "안개",
+        "48": "짙은 안개",
+        "51": "약한 이슬비",
+        "53": "이슬비",
+        "55": "강한 이슬비",
+        "61": "약한 비",
+        "63": "비",
+        "65": "강한 비",
+        "71": "약한 눈",
+        "73": "눈",
+        "75": "강한 눈",
+        "80": "소나기",
+        "81": "강한 소나기",
+        "82": "매우 강한 소나기",
+        "95": "뇌우",
+    }
+    condition = weather_map.get(weather_code, f"코드 {weather_code}")
+
+    wind_speed = float(current.get("wind_speed_10m", 0.0) or 0.0)
+    precipitation = float(current.get("precipitation", 0.0) or 0.0)
+    rain = float(current.get("rain", 0.0) or 0.0)
+    showers = float(current.get("showers", 0.0) or 0.0)
+    snowfall = float(current.get("snowfall", 0.0) or 0.0)
+
+    timeline: list[dict[str, Any]] = []
+    times = hourly.get("time", []) or []
+    t2m = hourly.get("temperature_2m", []) or []
+    w10 = hourly.get("wind_speed_10m", []) or []
+    pprob = hourly.get("precipitation_probability", []) or []
+    wcode = hourly.get("weather_code", []) or []
+    for idx in range(min(8, len(times))):
+        code = str(wcode[idx]) if idx < len(wcode) else "0"
+        cond = weather_map.get(code, f"코드 {code}")
+        hour = times[idx]
+        timeline.append(
+            {
+                "time": _to_local_time_label(hour),
+                "temperature_c": t2m[idx] if idx < len(t2m) else None,
+                "wind_mps": w10[idx] if idx < len(w10) else None,
+                "precip_probability": pprob[idx] if idx < len(pprob) else None,
+                "condition": cond,
+                "icon": _weather_icon(cond, is_day=True),
+            }
+        )
+
+    return {
+        "current": {
+            "time": now_time,
+            "condition": condition,
+            "icon": _weather_icon(condition, is_day=is_day),
+            "temperature_c": current.get("temperature_2m"),
+            "feels_like_c": current.get("apparent_temperature"),
+            "wind_mps": wind_speed,
+            "wind_feel": _wind_feel_desc(wind_speed),
+            "precipitation_mm": precipitation,
+            "rain_mm": rain,
+            "showers_mm": showers,
+            "snowfall_cm": snowfall,
+            "rain_feel": _rain_feel_desc(precipitation),
+        },
+        "timeline": timeline,
+    }
+
+
+async def build_weather_briefing_for_regions(regions: list[str]) -> dict[str, Any]:
+    cleaned = [r.strip() for r in regions if r and r.strip()]
+    if not cleaned:
+        raise ValueError("조회할 지역명이 비어 있습니다.")
+
+    items: list[dict[str, Any]] = []
+    for query in cleaned:
+        cands = await geocode_city(query, count=1)
+        if not cands:
+            items.append(
+                {
+                    "region_query": query,
+                    "ok": False,
+                    "error": "지역을 찾지 못했습니다.",
+                }
+            )
+            continue
+        loc = cands[0]
+        weather = await fetch_weather_now(loc["latitude"], loc["longitude"], loc.get("timezone", "Asia/Seoul"))
+        items.append(
+            {
+                "region_query": query,
+                "ok": True,
+                "location": loc,
+                "weather": weather,
+            }
+        )
+
+    successful = [x for x in items if x.get("ok")]
+    if not successful:
+        return {"items": items, "briefing": "조회 가능한 지역이 없어 날씨 브리핑을 만들지 못했습니다."}
+
+    lines = ["### 날씨 데일리 브리핑", ""]
+    for row in successful:
+        loc = row["location"]
+        cur = row["weather"]["current"]
+        lines.append(
+            f"- **{loc.get('name')}** {cur.get('icon')} {cur.get('condition')} · "
+            f"{cur.get('temperature_c')}°C (체감 {cur.get('feels_like_c')}°C)"
+        )
+        lines.append(
+            f"  - 바람: {cur.get('wind_mps')} m/s — {cur.get('wind_feel')}"
+        )
+        lines.append(
+            f"  - 강수: {cur.get('precipitation_mm')} mm/h "
+            f"(비 {cur.get('rain_mm')} · 소나기 {cur.get('showers_mm')} · 눈 {cur.get('snowfall_cm')}) — {cur.get('rain_feel')}"
+        )
+
+    return {"items": items, "briefing": "\n".join(lines)}
 
 
 def extract_keywords(text: str, top_k: int = 6) -> list[str]:

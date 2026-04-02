@@ -25,6 +25,12 @@
 | POST | `/api/generate` | `{ "keyword", "tone", "analyzed" }` |
 | POST | `/api/summarize` | `{ "keyword", "analyzed" }` |
 | POST | `/api/images` | `{ "keyword", "markdown" }` |
+| POST | `/api/economy/search` | `{ "keyword", "sort": "date" \| "sim" }` |
+| POST | `/api/economy/briefing` | `{ "keyword", "sort", "results": [] }` (`results` 생략 시 서버에서 뉴스 검색 후 브리핑 생성) |
+| POST | `/api/weather/search` | `{ "regions": ["서울", "부산", ...] }` |
+| POST | `/api/weather/briefing` | `{ "regions": ["서울", "부산", ...] }` |
+| POST | `/api/weather/search` | `{ "regions": ["서울", "부산", ...] }` 지역별 실시간 날씨 조회 |
+| POST | `/api/weather/briefing` | `{ "regions": [...] }` 지역별 날씨 + 바람/강수 체감 설명 브리핑 생성 |
 
 ## 로컬 Streamlit UI
 
