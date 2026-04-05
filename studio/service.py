@@ -5,6 +5,7 @@ import random
 import re
 from collections import Counter
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from email.utils import parsedate_to_datetime
 from html import unescape
 from pathlib import Path
@@ -145,6 +146,178 @@ async def search_news_by_naver_api(query: str, display: int = 12, sort: str = "d
             }
         )
     return normalized
+
+
+def _is_public_http_url(url: str) -> bool:
+    try:
+        p = urlparse((url or "").strip())
+        if p.scheme not in ("http", "https") or not p.netloc:
+            return False
+        host = (p.netloc or "").split("@")[-1].split(":")[0].lower()
+        if host in ("localhost", "127.0.0.1") or host.endswith(".local"):
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _normalize_economy_rows_from_web_json(data: dict[str, Any], *, limit: int) -> list[dict[str, Any]]:
+    items = data.get("items")
+    if not isinstance(items, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        if len(normalized) >= limit:
+            break
+        if not isinstance(item, dict):
+            continue
+        title = strip_html(str(item.get("title", "")).strip())
+        desc = strip_html(str(item.get("description", "")).strip())
+        url = str(item.get("url", "")).strip()
+        source = str(item.get("source", "")).strip() or "웹 검색"
+        published = str(item.get("published", "")).strip()[:32]
+        if not title or not _is_public_http_url(url):
+            continue
+        normalized.append(
+            {
+                "title": title,
+                "description": desc,
+                "link": url,
+                "originallink": url,
+                "naverlink": url,
+                "source": source,
+                "pubDate": published,
+            }
+        )
+    return normalized
+
+
+async def search_economy_news_by_web_search(query: str, display: int = 12, sort: str = "date") -> list[dict[str, Any]]:
+    """OpenAI Responses API의 웹 검색 도구로 키워드 관련 최신 경제 뉴스를 찾아 반환합니다."""
+    q = (query or "").strip()
+    if not q:
+        raise ValueError("검색 키워드가 비어 있습니다.")
+
+    api_key = _env("OPENAI_API_KEY").strip().strip('"').strip("'")
+    if not api_key:
+        raise ValueError("웹 뉴스 검색에는 OPENAI_API_KEY가 필요합니다.")
+
+    n = max(4, min(int(display or 12), 12))
+    sort_rule = (
+        "최신 발행·시의성이 높은 기사를 배열 앞쪽에 둘 것."
+        if sort == "date"
+        else "검색 키워드와 헤드라인·본문 주제 적합도가 높은 기사를 배열 앞쪽에 둘 것."
+    )
+
+    item_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "description": {"type": "string"},
+            "url": {"type": "string"},
+            "source": {"type": "string"},
+            "published": {"type": "string"},
+        },
+        "required": ["title", "description", "url", "source", "published"],
+        "additionalProperties": False,
+    }
+    top_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": item_schema,
+                "minItems": n,
+                "maxItems": n,
+            }
+        },
+        "required": ["items"],
+        "additionalProperties": False,
+    }
+
+    instructions = (
+        "너는 한국 경제 뉴스 큐레이터다. 반드시 웹 검색 도구로 인터넷에서 기사를 조회한 뒤에만 답한다. "
+        "기사 URL은 검색으로 확인된 실제 페이지 주소만 쓰고, 추측·가공으로 URL을 만들지 않는다."
+    )
+
+    user_prompt = f"""검색 키워드: 「{q[:200]}」
+
+웹 검색으로 위 키워드와 관련된 **한국 경제·금융·산업·고용·물가·환율·부동산·증시** 뉴스를 찾아라.
+
+규칙:
+- **한국어 보도**를 우선하고, 가능하면 서로 다른 언론·출처를 섞는다.
+- 응답 JSON의 items 배열 길이는 **정확히 {n}개** (부족하면 검색어를 넓혀 관련 기사를 더 찾을 것).
+- 각 url은 **해당 기사 본문 페이지**의 http(s) 링크여야 한다 (포털 검색 결과 페이지·메인 홈만 있는 URL 금지).
+- description은 검색 스니펫·기사 요지에 근거해 2~4문장으로 요약한다.
+- source는 언론사명 또는 사이트명을 짧게.
+- published는 기사 날짜를 알 수 있으면 YYYY-MM-DD, 아니면 빈 문자열.
+- 정렬: {sort_rule}
+
+최종 출력 형식: JSON 객체 하나만. 키는 `items` 배열과, 각 원소의 `title`, `description`, `url`, `source`, `published` 만 사용한다.
+"""
+
+    tool_web: dict[str, Any] = {
+        "type": "web_search",
+        "user_location": {"type": "approximate", "country": "KR"},
+        "search_context_size": "high",
+    }
+
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=api_key)
+
+    async def _responses_json(*, use_schema: bool, force_tool: bool) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "model": "gpt-4o",
+            "instructions": instructions,
+            "input": user_prompt,
+            "tools": [tool_web],
+            "tool_choice": "required" if force_tool else "auto",
+            "temperature": 0.15,
+            "max_output_tokens": 8192,
+        }
+        if use_schema:
+            kwargs["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "economy_news_feed",
+                    "strict": True,
+                    "schema": top_schema,
+                }
+            }
+        resp = await client.responses.create(**kwargs)
+        raw = (resp.output_text or "").strip()
+        return _parse_llm_json_object(raw)
+
+    try:
+        rows: list[dict[str, Any]] = []
+        try:
+            data = await _responses_json(use_schema=True, force_tool=True)
+            rows = _normalize_economy_rows_from_web_json(data, limit=n)
+        except Exception:
+            rows = []
+        if len(rows) < min(4, n):
+            try:
+                data = await _responses_json(use_schema=False, force_tool=False)
+                rows2 = _normalize_economy_rows_from_web_json(data, limit=n)
+                if len(rows2) > len(rows):
+                    rows = rows2
+            except Exception:
+                pass
+
+        if len(rows) < min(4, n):
+            raise ValueError(
+                "웹 검색으로 가져온 유효한 기사 링크가 부족합니다. 키워드를 바꾸거나 잠시 후 다시 시도해 주세요."
+            )
+        return rows[:n]
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"웹 뉴스 검색 실패: {exc}") from exc
+
+
+# 호환용 (기존 코드·문서에서 이름 참조 시)
+search_economy_news_by_gpt = search_economy_news_by_web_search
 
 
 def _categorize_economy_article(text: str) -> str:
@@ -339,6 +512,222 @@ async def build_economy_briefing_for_students(
             base
             + f"\n\n---\n\n**(학생용 설명 자동 생성에 실패했습니다)**\n{err}{hint}\n\n위는 규칙 기반 브리핑 원문입니다."
         )
+
+
+def _economy_chip_strings(raw: Any, *, max_items: int = 10, max_chars: int = 15) -> list[str]:
+    out: list[str] = []
+    if not isinstance(raw, list):
+        return []
+    for x in raw:
+        s = str(x).strip()
+        if not s:
+            continue
+        if len(s) > max_chars:
+            s = s[:max_chars].rstrip()
+        out.append(s)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _parse_llm_json_object(text: str) -> dict[str, Any]:
+    t = text.strip()
+    if t.startswith("```"):
+        t = re.sub(r"^```(?:json)?\s*", "", t, flags=re.I)
+        t = re.sub(r"\s*```\s*$", "", t)
+    try:
+        out = json.loads(t)
+        return out if isinstance(out, dict) else {}
+    except json.JSONDecodeError:
+        m = re.search(r"\{[\s\S]*\}", t)
+        if m:
+            try:
+                out = json.loads(m.group(0))
+                return out if isinstance(out, dict) else {}
+            except json.JSONDecodeError:
+                pass
+        return {}
+
+
+async def extract_economy_keyword_chips_from_news(
+    results: list[dict[str, Any]],
+    *,
+    diversity_seed: int | None = None,
+) -> dict[str, Any]:
+    """뉴스 목록 기반 맘·학생·공통 토픽 키워드 칩(JSON)."""
+    empty: dict[str, Any] = {
+        "Mom_Keywords": [],
+        "Student_Keywords": [],
+        "Common_Topic": "",
+        "ok": False,
+        "message": "",
+        "source": "news",
+    }
+    if not results:
+        return {**empty, "message": "뉴스 결과가 없습니다."}
+
+    api_key = _env("OPENAI_API_KEY").strip().strip('"').strip("'")
+    if not api_key:
+        return {**empty, "message": "OPENAI_API_KEY가 필요합니다."}
+
+    lines: list[str] = []
+    for i, row in enumerate(results[:10], 1):
+        title = (row.get("title") or "").strip()
+        desc = (row.get("description") or "").strip().replace("\n", " ")
+        lines.append(f"{i}. {title[:180]}\n   요약: {desc[:380]}")
+    news_blob = "\n".join(lines)
+
+    seed_block = ""
+    if diversity_seed is not None:
+        seed_block = (
+            f"\n다양성 시드: {diversity_seed} — 정치·사회·문화·기술·생활소비 등 서로 다른 관점 중 "
+            "하나를 골라, 그 관점이 살짝 드러나도록 칩 톤을 바꿔 줄 것.\n"
+        )
+
+    system_persona = (
+        "너는 뉴스 기사에서 핵심 정보를 파악해 사용자의 관심을 끄는 **'클릭 유도형 키워드(Click-bait Keywords)'**를 만드는 "
+        "마케팅 전문가이자 경제 분석가야. 특히 40대 주부와 10대 학생이 각각 무엇에 반응하는지 정확히 알고 있어. "
+        "출력은 요청한 JSON 객체 하나만. 다른 설명·마크다운 금지."
+    )
+
+    user_prompt = f"""다음 뉴스 기사를 분석하여 아래 키 이름을 정확히 지킨 JSON만 출력해줘.
+
+{{
+  "Mom_Keywords": ["문구1", "문구2", "문구3", "문구4", "문구5", "문구6", "문구7", "문구8", "문구9", "문구10"],
+  "Student_Keywords": ["문구1", "문구2", "문구3", "문구4", "문구5", "문구6", "문구7", "문구8", "문구9", "문구10"],
+  "Common_Topic": "핵심 경제 용어 한 단어 또는 짧은 구"
+}}
+
+규칙:
+- Mom_Keywords (40대 주부 타겟): 뉴스 맥락에 맞춰 **실속형** 클릭 문구 정확히 **10개**. 반드시 아래 축을 골고루 반영할 것 — **자녀 교육**, **경제·가계 현황**, **다이어트**, **인간관계**, **긍정적 마인드**, **부동산/주식/재테크**(직접 연결 가능한 것 위주). #태그 형식 권장.
+- Student_Keywords (10대 학생 타겟): 뉴스 맥락에 맞춰 **트렌디한** 문구 정확히 **10개**. 아래 축과 연결할 것 — **역사**, **경제**, **시장**, **용돈**, **유행 브랜드**, **게임/IT**, **미래 직업**. #태그 형식 권장.
+- Common_Topic: 기사의 가장 핵심적인 경제 용어 1개(짧게).
+- 각 칩은 공백 포함 15자 이내, 짧고 강렬하게.
+{seed_block}
+[뉴스 기사]
+{news_blob}
+"""
+
+    try:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=api_key)
+        completion = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_persona},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.78,
+            max_tokens=1400,
+            response_format={"type": "json_object"},
+        )
+        raw_text = (completion.choices[0].message.content or "").strip()
+        data = _parse_llm_json_object(raw_text)
+        mom = _economy_chip_strings(data.get("Mom_Keywords"))
+        stu = _economy_chip_strings(data.get("Student_Keywords"))
+        ct = data.get("Common_Topic")
+        common_s = str(ct).strip()[:20] if ct is not None else ""
+        if len(mom) < 1 and len(stu) < 1 and not common_s:
+            return {**empty, "message": "키워드 JSON 파싱에 실패했습니다."}
+        return {
+            "Mom_Keywords": mom,
+            "Student_Keywords": stu,
+            "Common_Topic": common_s,
+            "ok": True,
+            "message": "",
+            "source": "news",
+        }
+    except Exception as exc:
+        return {**empty, "message": str(exc)[:500]}
+
+
+async def extract_economy_keyword_chips_trending(
+    *,
+    hint: str | None = None,
+    diversity_seed: int | None = None,
+) -> dict[str, Any]:
+    """뉴스 없이 GPT만으로 맘·학생·공통 키워드 칩 제안(검색 전용)."""
+    empty: dict[str, Any] = {
+        "Mom_Keywords": [],
+        "Student_Keywords": [],
+        "Common_Topic": "",
+        "ok": False,
+        "message": "",
+        "source": "trending",
+    }
+    api_key = _env("OPENAI_API_KEY").strip().strip('"').strip("'")
+    if not api_key:
+        return {**empty, "message": "OPENAI_API_KEY가 필요합니다."}
+
+    hint_block = ""
+    h = (hint or "").strip()
+    if h:
+        hint_block = f"\n사용자 힌트(반드시 반영): 「{h[:140]}」\n"
+
+    seed_block = ""
+    if diversity_seed is not None:
+        seed_block = (
+            f"\n다양성 시드: {diversity_seed} — 정치·사회·문화·기술·생활소비·글로벌 중 "
+            "서로 다른 관점 하나를 골라 칩 톤을 바꿀 것.\n"
+        )
+
+    system_persona = (
+        "너는 뉴스 기사에서 핵심 정보를 파악해 사용자의 관심을 끄는 **'클릭 유도형 키워드(Click-bait Keywords)'**를 만드는 "
+        "마케팅 전문가이자 경제 분석가야. 특히 40대 주부와 10대 학생이 각각 무엇에 반응하는지 정확히 알고 있어. "
+        "출력은 요청한 JSON 객체 하나만. 다른 설명·마크다운 금지."
+    )
+
+    user_prompt = f"""실제 뉴스 본문은 주어지지 않는다. 최근 한국 경제·사회 화제를 가정해, 네이버 뉴스 검색에 쓸 만한 클릭 유도형 키워드 칩 JSON만 출력해줘.
+
+키 이름(정확히):
+{{
+  "Mom_Keywords": ["문구1", "문구2", "문구3", "문구4", "문구5", "문구6", "문구7", "문구8", "문구9", "문구10"],
+  "Student_Keywords": ["문구1", "문구2", "문구3", "문구4", "문구5", "문구6", "문구7", "문구8", "문구9", "문구10"],
+  "Common_Topic": "핵심 경제 용어 한 단어 또는 짧은 구"
+}}
+
+규칙:
+- Mom_Keywords (40대 주부 타겟): 힌트·최근 화제 맥락에 맞춰 **실속형** 문구 정확히 **10개** — **자녀 교육**, **경제·가계 현황**, **다이어트**, **인간관계**, **긍정적 마인드**, **부동산/주식/재테크** 축을 활용. #태그 형식 권장.
+- Student_Keywords (10대 학생 타겟): **트렌디한** 문구 정확히 **10개** — **역사**, **경제**, **시장**, **용돈**, **유행 브랜드**, **게임/IT**, **미래 직업**과 연결. #태그 형식 권장.
+- Common_Topic: 지금 이슈로 그럴듯한 핵심 경제 용어 1개.
+- 각 칩 공백 포함 15자 이내.
+{hint_block}
+{seed_block}
+"""
+
+    try:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=api_key)
+        completion = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_persona},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.82,
+            max_tokens=1400,
+            response_format={"type": "json_object"},
+        )
+        raw_text = (completion.choices[0].message.content or "").strip()
+        data = _parse_llm_json_object(raw_text)
+        mom = _economy_chip_strings(data.get("Mom_Keywords"))
+        stu = _economy_chip_strings(data.get("Student_Keywords"))
+        ct = data.get("Common_Topic")
+        common_s = str(ct).strip()[:20] if ct is not None else ""
+        if len(mom) < 1 and len(stu) < 1 and not common_s:
+            return {**empty, "message": "키워드 JSON 파싱에 실패했습니다."}
+        return {
+            "Mom_Keywords": mom,
+            "Student_Keywords": stu,
+            "Common_Topic": common_s,
+            "ok": True,
+            "message": "",
+            "source": "trending",
+        }
+    except Exception as exc:
+        return {**empty, "message": str(exc)[:500]}
 
 
 def _wind_feel_desc(speed_mps: float) -> str:
@@ -616,7 +1005,237 @@ async def fetch_weather_now(latitude: float, longitude: float, timezone: str = "
     }
 
 
-async def build_weather_briefing_for_regions(regions: list[str]) -> dict[str, Any]:
+async def fetch_air_quality_snapshot(
+    latitude: float, longitude: float, timezone: str = "Asia/Seoul"
+) -> dict[str, Any]:
+    """Open-Meteo 대기질 API — PM2.5·PM10·UV (모델값, 참고용). 실패 시 빈 dict."""
+    url = "https://air-quality-api.open-meteo.com/v1/air-quality"
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "timezone": timezone,
+        "hourly": "pm2_5,pm10,uv_index",
+        "forecast_days": 2,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            payload = response.json()
+    except Exception:
+        return {}
+
+    hourly = payload.get("hourly") or {}
+    times: list[str] = list(hourly.get("time") or [])
+    if not times:
+        return {}
+
+    pm25 = list(hourly.get("pm2_5") or [])
+    pm10 = list(hourly.get("pm10") or [])
+    uv = list(hourly.get("uv_index") or [])
+
+    tz = ZoneInfo(timezone)
+    now = datetime.now(tz)
+    best_i = 0
+    best_sec: float | None = None
+    for i, t in enumerate(times):
+        if not isinstance(t, str) or len(t) < 16:
+            continue
+        try:
+            dt = datetime.fromisoformat(t)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=tz)
+            sec = abs((dt - now).total_seconds())
+            if best_sec is None or sec < best_sec:
+                best_sec = sec
+                best_i = i
+        except Exception:
+            continue
+
+    def _at(arr: list[Any], idx: int) -> float | None:
+        if idx < len(arr) and arr[idx] is not None:
+            try:
+                return float(arr[idx])
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    out: dict[str, Any] = {}
+    p25 = _at(pm25, best_i)
+    p10 = _at(pm10, best_i)
+    uvi = _at(uv, best_i)
+    if p25 is not None:
+        out["pm2_5_ugm3"] = p25
+    if p10 is not None:
+        out["pm10_ugm3"] = p10
+    if uvi is not None:
+        out["uv_index"] = uvi
+    if best_i < len(times):
+        out["reference_time"] = times[best_i]
+    return out
+
+
+def _weather_timeline_aggregate(timeline: list[dict[str, Any]]) -> str:
+    if not timeline:
+        return "향후 24시간 타임라인 없음"
+    temps: list[float] = []
+    prob_slots: list[tuple[float, str]] = []
+    for slot in timeline:
+        tc = slot.get("temperature_c")
+        if tc is not None:
+            try:
+                temps.append(float(tc))
+            except (TypeError, ValueError):
+                pass
+        pr = slot.get("precip_probability")
+        if pr is not None:
+            try:
+                prob_slots.append((float(pr), str(slot.get("time", ""))))
+            except (TypeError, ValueError):
+                pass
+    parts: list[str] = []
+    if temps:
+        parts.append(f"예보 구간 기온 약 {min(temps):.0f}°C ~ {max(temps):.0f}°C")
+    if prob_slots:
+        mx = max(prob_slots, key=lambda x: x[0])
+        parts.append(f"강수확률 최대 약 {mx[0]:.0f}% ({mx[1]})")
+    return " · ".join(parts) if parts else "집계 없음"
+
+
+def _weather_timeline_sample_lines(timeline: list[dict[str, Any]], max_slots: int = 5) -> str:
+    if not timeline:
+        return "(슬롯 없음)"
+    n = len(timeline)
+    if n <= max_slots:
+        picks = timeline
+    else:
+        step = max(1, n // max_slots)
+        picks = [timeline[i] for i in range(0, n, step)][:max_slots]
+    lines = []
+    for p in picks:
+        lines.append(
+            f"  - {p.get('time')}: {p.get('condition')} · {p.get('temperature_c')}°C · "
+            f"바람 {p.get('wind_mps')} m/s · 강수확률 {p.get('precip_probability')}%"
+        )
+    return "\n".join(lines)
+
+
+def _weather_regions_llm_context_block(successful: list[dict[str, Any]], now_label: str) -> str:
+    chunks: list[str] = [f"기준 시각(서버): {now_label}", ""]
+    for row in successful:
+        loc = row["location"]
+        w = row["weather"]
+        cur = w["current"]
+        tl = w.get("timeline") or []
+        air = w.get("air_quality") or {}
+        name = loc.get("name") or row.get("region_query") or "지역"
+        admin = (loc.get("admin") or "").strip()
+        country = (loc.get("country") or "").strip()
+        loc_line = f"{name}" + (f" ({admin})" if admin else "") + (f", {country}" if country else "")
+
+        air_bits: list[str] = []
+        if air.get("pm2_5_ugm3") is not None:
+            air_bits.append(f"PM2.5 약 {air['pm2_5_ugm3']:.1f} ㎍/㎥ (모델)")
+        if air.get("pm10_ugm3") is not None:
+            air_bits.append(f"PM10 약 {air['pm10_ugm3']:.1f} ㎍/㎥ (모델)")
+        if air.get("uv_index") is not None:
+            air_bits.append(f"자외선 지수(UV) 약 {air['uv_index']:.1f}")
+        air_line = " / ".join(air_bits) if air_bits else "미세먼지·UV: API 데이터 없음(해당 항목은 수치 없이 안내만)"
+
+        chunks.append(f"[{loc_line}] 검색어: {row.get('region_query')}")
+        chunks.append(
+            f"- 현재: {cur.get('icon', '')} {cur.get('condition')} · 기온 {cur.get('temperature_c')}°C "
+            f"(체감 {cur.get('feels_like_c')}°C) · 관측시각 {cur.get('time', '')}"
+        )
+        chunks.append(
+            f"- 바람: {cur.get('wind_mps')} m/s ({cur.get('wind_feel')}) · "
+            f"강수 강도 mm/h: 총 {cur.get('precipitation_mm')} (비 {cur.get('rain_mm')}, 소나기 {cur.get('showers_mm')}, 눈cm {cur.get('snowfall_cm')}) — {cur.get('rain_feel')}"
+        )
+        chunks.append(f"- 24시간 예보 요약: {_weather_timeline_aggregate(tl)}")
+        chunks.append(f"- 대기·자외선: {air_line}")
+        chunks.append("- 시간대 샘플:")
+        chunks.append(_weather_timeline_sample_lines(tl))
+        chunks.append("")
+    return "\n".join(chunks).strip()
+
+
+async def _build_weather_morning_alert_briefing_llm(context_block: str) -> str:
+    """통합 날씨 브리핑: 우리 집 아침 알림이 (GPT). 실패 시 빈 문자열."""
+    api_key = _env("OPENAI_API_KEY").strip().strip('"').strip("'")
+    if not api_key:
+        return ""
+
+    system_persona = (
+        "너는 기상 캐스터이면서 동시에 **'꼼꼼한 살림꾼'**이자 **'트렌디한 스타일리스트'**야. "
+        "오늘 날씨 정보를 바탕으로 40대 주부와 10대 학생에게 꼭 필요한 맞춤형 가이드를 제공해줘. "
+        "아래 [지역별 날씨 원시 데이터]에 없는 기온·강수·미세먼지·자외선 수치를 지어내지 말 것. "
+        "미세먼지·UV가 없다고 적혀 있으면 수치를 만들지 말고, 앱·기상청 확인을 권하는 짧은 문장으로 처리할 것."
+    )
+
+    user_instructions = f"""[통합 날씨 브리핑: 우리 집 아침 알림이]
+
+2. 출력 포맷 지시 사항 (Output Structure) — 반드시 아래 순서·이모지·소제목을 지킬 것.
+
+[PART 1. 오늘의 날씨 요약]
+
+🌡️ 기온 및 하늘: 현재·최고·최저(데이터에 있으면) 기온과 하늘 상태를 한국어로 생동감 있게 (예: "맑음 뒤 비☔" 느낌으로 가능).
+
+😷 미세먼지/지수: 원시 데이터의 PM2.5·PM10·UV가 있으면 짧게 해석하고, 없으면 "오늘은 미세먼지 앱에서 한 번 확인해요" 수준으로만.
+
+[PART 2. 엄마를 위한 '오늘의 살림 캐스터']
+
+🧺 세탁 및 환기: "오늘은 빨래가 잘 말라요!", "환기는 오후 ○시쯤이 나을 수 있어요" 같이 실속 팁 (날씨·바람·비와 모순 없게).
+
+🥘 오늘 저녁 메뉴 추천: 날씨에 어울리는 음식 (예: 비 오는 날 부침개, 미세먼지 심할 땐 국물 요리 등 — 데이터와 맞게).
+
+👜 외출 준비물: 우산, 마스크, 가벼운 겉옷 등.
+
+[PART 3. 학생을 위한 '오늘의 등교 룩 & 팁']
+
+👕 등교 코디 추천: 10대 유행 스타일을 반영해 유쾌하게 (예: 반팔+바람막이, 비 올 땐 레인부츠 등, 기온·강수에 맞게).
+
+🍱 매점/간식 추천: 날씨에 따라 생각날 만한 간식.
+
+⛹️ 점심시간 활동: 운동장·실내 등 (비·바람·미세먼지 반영).
+
+[PART 4. 가족을 위한 '오늘의 한 줄 덕담']
+
+💖 따뜻한 응원: 한두 문장.
+
+3. 제약 사항 (Constraints)
+- 어조: 엄마에게는 상냥하고 정보 중심, 학생에게는 티키타카 가능한 유쾌하고 친근한 말투.
+- 비유: 단순히 "기온이 낮다"만 쓰지 말고 "어제보다 붕어빵이 더 생각날 정도로 추워요" 같은 생동감 있는 표현을 섞을 것.
+- 길이: 바쁜 아침에 빠르게 읽도록 각 소항목당 1~2문장.
+- 지역이 여러 개면 지역명을 밝혀 [서울] [부산] 식으로 나누거나 한 페이지에서 자연스럽게 모두 언급할 것.
+
+---
+[지역별 날씨 원시 데이터 — 이 블록만 근거로 작성]
+{context_block}
+"""
+
+    try:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=api_key)
+        completion = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_persona},
+                {"role": "user", "content": user_instructions},
+            ],
+            temperature=0.48,
+            max_tokens=3800,
+        )
+        text = (completion.choices[0].message.content or "").strip()
+        return text
+    except Exception:
+        return ""
+
+
+async def collect_weather_region_items(
+    regions: list[str], *, include_air_quality: bool = False
+) -> list[dict[str, Any]]:
+    """지역별 지오코딩 + 날씨(·선택 대기질). 검색 전용은 대기질 생략으로 지연을 줄임."""
     cleaned = [r.strip() for r in regions if r and r.strip()]
     if not cleaned:
         raise ValueError("조회할 지역명이 비어 있습니다.")
@@ -634,7 +1253,14 @@ async def build_weather_briefing_for_regions(regions: list[str]) -> dict[str, An
             )
             continue
         loc = cands[0]
-        weather = await fetch_weather_now(loc["latitude"], loc["longitude"], loc.get("timezone", "Asia/Seoul"))
+        tz = loc.get("timezone", "Asia/Seoul")
+        weather = await fetch_weather_now(loc["latitude"], loc["longitude"], tz)
+        if include_air_quality:
+            weather["air_quality"] = await fetch_air_quality_snapshot(
+                loc["latitude"], loc["longitude"], tz
+            )
+        else:
+            weather["air_quality"] = {}
         items.append(
             {
                 "region_query": query,
@@ -643,18 +1269,35 @@ async def build_weather_briefing_for_regions(regions: list[str]) -> dict[str, An
                 "weather": weather,
             }
         )
+    return items
+
+
+async def fetch_weather_items_for_regions(regions: list[str]) -> dict[str, Any]:
+    """실시간 검색용: LLM·대기질 API 없이 카드 데이터만."""
+    items = await collect_weather_region_items(regions, include_air_quality=False)
+    return {"items": items}
+
+
+async def build_weather_briefing_for_regions(regions: list[str]) -> dict[str, Any]:
+    items = await collect_weather_region_items(regions, include_air_quality=True)
 
     successful = [x for x in items if x.get("ok")]
     if not successful:
         return {"items": items, "briefing": "조회 가능한 지역이 없어 날씨 브리핑을 만들지 못했습니다."}
 
-    lines = ["### 날씨 데일리 브리핑", ""]
+    lines = ["### 날씨 데일리 브리핑 (요약)", ""]
     for row in successful:
         loc = row["location"]
         cur = row["weather"]["current"]
+        air = row["weather"].get("air_quality") or {}
+        air_hint = ""
+        if air.get("pm2_5_ugm3") is not None:
+            air_hint += f" · PM2.5≈{air['pm2_5_ugm3']:.0f}"
+        if air.get("uv_index") is not None:
+            air_hint += f" · UV≈{air['uv_index']:.1f}"
         lines.append(
             f"- **{loc.get('name')}** {cur.get('icon')} {cur.get('condition')} · "
-            f"{cur.get('temperature_c')}°C (체감 {cur.get('feels_like_c')}°C)"
+            f"{cur.get('temperature_c')}°C (체감 {cur.get('feels_like_c')}°C){air_hint}"
         )
         lines.append(
             f"  - 바람: {cur.get('wind_mps')} m/s — {cur.get('wind_feel')}"
@@ -664,7 +1307,27 @@ async def build_weather_briefing_for_regions(regions: list[str]) -> dict[str, An
             f"(비 {cur.get('rain_mm')} · 소나기 {cur.get('showers_mm')} · 눈 {cur.get('snowfall_cm')}) — {cur.get('rain_feel')}"
         )
 
-    return {"items": items, "briefing": "\n".join(lines)}
+    base_md = "\n".join(lines)
+    now_label = datetime.now().strftime("%Y-%m-%d %H:%M")
+    ctx = _weather_regions_llm_context_block(successful, now_label)
+    llm_text = await _build_weather_morning_alert_briefing_llm(ctx)
+    api_key = _env("OPENAI_API_KEY").strip().strip('"').strip("'")
+
+    if llm_text:
+        briefing = llm_text
+    elif not api_key:
+        briefing = (
+            base_md
+            + "\n\n---\n\n**통합 아침 브리핑**(PART 1~4: 날씨 요약·살림 캐스터·등교 룩·덕담)은 "
+            "`OPENAI_API_KEY`를 설정하면 GPT로 생성됩니다. 위는 관측·예보·대기질(모델) 요약입니다."
+        )
+    else:
+        briefing = (
+            base_md
+            + "\n\n---\n\n**(맞춤 아침 브리핑 생성에 실패했습니다.)** 잠시 후 다시 시도하세요. 위는 관측·예보 요약입니다."
+        )
+
+    return {"items": items, "briefing": briefing}
 
 
 def extract_keywords(text: str, top_k: int = 6) -> list[str]:

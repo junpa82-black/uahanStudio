@@ -13,6 +13,148 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
+    <style>
+      .economy-keyword-toolbar {
+        display: flex;
+        gap: 0.5rem;
+        align-items: flex-start;
+      }
+      .economy-keyword-toolbar .economy-keyword-input-wrap {
+        flex: 1;
+        min-width: 0;
+      }
+      .economy-keyword-toolbar.is-collapsed .economy-keyword-input-wrap {
+        display: none;
+      }
+      .economy-keyword-summary {
+        display: none;
+        font-size: 0.88rem;
+        color: var(--meta);
+        line-height: 1.45;
+        padding: 0.55rem 0.75rem;
+        background: var(--canvas);
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        flex: 1;
+        min-width: 0;
+        word-break: keep-all;
+      }
+      .economy-keyword-toolbar.is-collapsed .economy-keyword-summary {
+        display: block;
+      }
+      .btn-icon-search {
+        flex-shrink: 0;
+        min-width: var(--tap-min);
+        min-height: var(--tap-min);
+        padding: 0 0.85rem;
+        border-radius: var(--radius);
+        font-size: 1.15rem;
+        line-height: 1;
+        cursor: pointer;
+        border: 2px solid var(--border-strong);
+        background: var(--card);
+        color: var(--text);
+        transition: border-color 0.15s ease, background 0.15s ease;
+      }
+      .btn-icon-search:hover {
+        border-color: var(--orange);
+        background: var(--canvas);
+      }
+      .btn-icon-search.is-on {
+        border-color: var(--orange);
+        box-shadow: 0 0 0 2px rgba(255, 69, 0, 0.2);
+      }
+      .economy-ui-hidden {
+        display: none !important;
+      }
+      .economy-keyword-unified {
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius);
+        padding: 1rem 1.1rem;
+        margin-bottom: 1rem;
+        background: var(--card);
+      }
+      .economy-chips-panel.economy-chips-inline {
+        margin-bottom: 0;
+        margin-top: 0.9rem;
+        padding-top: 0.9rem;
+        border-top: 1px dashed var(--border);
+      }
+      .economy-field-row-school .economy-school-field {
+        grid-column: 1 / -1;
+      }
+      .economy-chips-panel {
+        margin-bottom: 0.85rem;
+      }
+      .economy-chips-panel .economy-chip-group {
+        margin-bottom: 0.65rem;
+      }
+      .economy-chips-panel .economy-chip-group:last-child {
+        margin-bottom: 0;
+      }
+      .economy-chip-group-label {
+        display: block;
+        font-size: 0.65rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--meta);
+        margin-bottom: 0.35rem;
+      }
+      .economy-chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+      }
+      .economy-chip {
+        display: inline-flex;
+        align-items: center;
+        max-width: 100%;
+        padding: 0.35rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        font-weight: 700;
+        cursor: pointer;
+        border: 2px solid var(--border-strong);
+        background: var(--card);
+        color: var(--text);
+        transition: border-color 0.12s ease, background 0.12s ease, transform 0.1s ease;
+        word-break: break-word;
+      }
+      .economy-chip:hover {
+        border-color: var(--orange);
+      }
+      .economy-chip.is-selected {
+        border-color: var(--orange);
+        background: rgba(255, 69, 0, 0.1);
+        color: var(--text);
+      }
+      @media (prefers-color-scheme: dark) {
+        .economy-chip.is-selected {
+          background: rgba(255, 69, 0, 0.16);
+        }
+      }
+      /* 키워드 받기 버튼·안내는 숨김 (접속 시 자동 fetch만 유지) */
+      .economy-keyword-topbar {
+        display: none;
+      }
+      .economy-keyword-picklist {
+        width: 100%;
+        font: inherit;
+        font-size: 0.9rem;
+        padding: 0.35rem 0.5rem;
+        border: 2px solid var(--border-strong);
+        border-radius: var(--radius);
+        background: var(--card);
+        color: var(--text);
+        min-height: 18rem;
+      }
+      .economy-keyword-picklist:focus {
+        outline: none;
+        border-color: var(--orange);
+        box-shadow: 0 0 0 3px rgba(255, 69, 0, 0.2);
+      }
+    </style>
   </head>
   <body>
     <header class="site-header">
@@ -21,7 +163,6 @@
           <span class="brand-mark" aria-hidden="true"></span>
           <span class="brand-text">
             <span class="brand-name">우아한빅토리 스튜디오</span>
-            <span class="brand-sub">검색 · 분석 · 초안 · 한 화면에서</span>
           </span>
         </a>
       </div>
@@ -62,24 +203,83 @@
         <div class="page-wrap">
           <div class="feed-column">
             <div class="create-card">
-              <label for="economy-keyword">브리핑 키워드</label>
-              <input
-                id="economy-keyword"
-                type="text"
-                value="한국 금리 환율 증시"
-                placeholder="예: 미국 금리 인하, 반도체 수출, 환율"
-                autocomplete="off"
-              />
+              <div class="economy-keyword-topbar">
+                <button type="button" class="btn-secondary" id="btn-economy-chips-gpt">키워드 받기</button>
+                <span class="muted" style="font-size: 0.78rem">페이지를 열면 자동으로 한 번 받아옵니다. 다시 받으려면 누르세요.</span>
+              </div>
 
-              <div class="field-row">
-                <div>
+              <div class="economy-keyword-unified">
+                <h2 class="section-title" style="margin-top: 0; margin-bottom: 0.4rem; font-size: 1.08rem">
+                  브리핑 키워드 · AI 추천
+                </h2>
+                <p class="muted" style="margin: 0 0 0.85rem; font-size: 0.78rem; line-height: 1.45">
+                  한 화면에서 <strong>직접 입력</strong>과 <strong>AI 추천 목록</strong>을 함께 씁니다. 목록에서 고르면 위 입력란에 반영됩니다.
+                  <strong>뉴스 검색</strong> 후에는 기사 기준으로 목록이 갱신됩니다.
+                </p>
+
+                <label for="economy-keyword" class="economy-chip-group-label">브리핑 키워드 (직접 입력 · 🔍)</label>
+                <div class="economy-keyword-toolbar" id="economy-keyword-toolbar">
+                  <div class="economy-keyword-input-wrap">
+                    <input
+                      id="economy-keyword"
+                      type="text"
+                      value="한국 금리 환율 증시"
+                      placeholder="예: 미국 금리 인하, 반도체 수출, 환율"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div class="economy-keyword-summary" id="economy-keyword-summary" aria-live="polite"></div>
+                  <button
+                    type="button"
+                    class="btn-icon-search"
+                    id="btn-economy-keyword-toggle"
+                    title="직접 입력 (돋보기)"
+                    aria-pressed="false"
+                    aria-label="키워드 직접 입력 열기"
+                  >
+                    🔍
+                  </button>
+                </div>
+
+                <div class="economy-chips-panel economy-chips-inline" id="economy-chips-panel" hidden>
+                  <p
+                    class="muted"
+                    id="economy-chips-lede"
+                    style="margin: 0 0 0.5rem; font-size: 0.78rem; line-height: 1.45"
+                  >
+                    목록에서 항목을 선택하면 브리핑·검색 주제로 반영됩니다.
+                  </p>
+                  <label for="economy-keyword-picklist" class="economy-chip-group-label">AI 추천 키워드</label>
+                  <select id="economy-keyword-picklist" class="economy-keyword-picklist" size="16" aria-label="AI 추천 키워드 목록">
+                    <option value="">불러오는 중…</option>
+                  </select>
+                  <div id="economy-chips-message" class="muted" style="display: none; margin-top: 0.5rem; font-size: 0.85rem"></div>
+                </div>
+              </div>
+
+              <div class="field-row economy-field-row-school">
+                <div class="economy-ui-hidden">
                   <label for="economy-sort">검색 정렬</label>
                   <select id="economy-sort">
                     <option value="date">최신순(date)</option>
                     <option value="sim">관련도순(sim)</option>
                   </select>
                 </div>
-                <div>
+                <div class="economy-school-field">
+                  <label for="economy-school-level">학생 파트 학력 (PART 2 난이도)</label>
+                  <select id="economy-school-level" autocomplete="off">
+                    <option value="">기본</option>
+                    <option value="초등">초등 수준</option>
+                    <option value="중등">중등 수준</option>
+                    <option value="고등">고등 수준</option>
+                  </select>
+                </div>
+              </div>
+              <p class="muted" style="margin: 0.5rem 0 0; font-size: 0.8rem; line-height: 1.4">
+                「기본」은 40대 주부 가정으로 설정되고, 초·중·고를 고르면 그때만 화면 선택이 우선합니다.
+              </p>
+              <div class="field-row economy-ui-hidden" style="margin-top: 0.85rem">
+                <div style="grid-column: 1 / -1">
                   <label for="economy-limit">브리핑 범위</label>
                   <input id="economy-limit" type="text" value="최근 뉴스 12건" readonly />
                 </div>
@@ -87,6 +287,9 @@
 
               <div class="action-bar">
                 <button type="button" class="btn-primary" id="btn-economy-search">뉴스 검색</button>
+                <button type="button" class="btn-secondary" id="btn-economy-chips-from-news" disabled>
+                  기사 기준 키워드 새로고침
+                </button>
                 <button type="button" class="btn-secondary" id="btn-economy-briefing">브리핑 생성</button>
               </div>
               <div id="economy-status" class="muted"></div>
@@ -95,7 +298,7 @@
             <div class="widget economy-briefing-panel" id="economy-briefing-section">
               <h2 class="section-title" style="margin-top: 0">오늘의 브리핑</h2>
               <p class="muted" style="margin: 0 0 0.65rem; font-size: 0.85rem; line-height: 1.45">
-                <strong>브리핑 생성</strong>을 누르면 GPT가 아래 순서로 정리합니다.<br />
+                브리핑 생성을 누르면 아래 순서로 정리합니다.<br />
                 PART 1 엄마 실속 리포트 → PART 2 학생 뉴스 3분 컷 → PART 3 저녁 식탁 대화 가이드 → 마지막에 삽화용 영문 이미지 프롬프트 한 줄.
               </p>
               <pre class="out economy-briefing-out" id="economy-briefing">(브리핑 없음)</pre>
@@ -110,12 +313,12 @@
               <h2 class="section-title">출처 분포</h2>
               <div id="economy-signals" class="muted">뉴스 검색 후 집계됩니다.</div>
             </div>
-            <div class="widget">
+            <div class="widget economy-ui-hidden">
               <h2 class="section-title">사용 안내</h2>
               <div class="muted">
-                1) <strong>뉴스 검색</strong>으로 기사 목록을 불러옵니다.<br />
-                2) <strong>브리핑 생성</strong>은 엄마·학생·가족 대화용 통합 리포트(GPT)입니다. <code>OPENAI_API_KEY</code> 필요.<br />
-                3) 학생 파트 난이도는 서버 환경 변수 <code>BRIEFING_SCHOOL_LEVEL</code>(초등/중등/고등, 기본 중등)로 조절할 수 있습니다.
+                1) 상단 <strong>브리핑 키워드 · AI 추천</strong>에서 목록을 고르거나 직접 입력한 뒤 <strong>뉴스 검색</strong>·<strong>브리핑 생성</strong>을 씁니다.<br />
+                2) <strong>브리핑 생성</strong>은 엄마·학생·가족 대화용 통합 리포트(GPT)입니다.<br />
+                3) <strong>학생 파트 학력</strong>: 「기본」은 40대 주부 가정으로 설정되고, 초·중·고를 고르면 그때만 화면 선택이 우선합니다.
               </div>
             </div>
           </aside>
@@ -125,7 +328,19 @@
 
     <script type="module">
       const $ = (id) => document.getElementById(id);
-      const state = { results: [], briefing: "" };
+      const state = {
+        results: [],
+        briefing: "",
+        chips: null,
+        chipsFlat: [],
+        selectedChip: null,
+        manualKeywordExpanded: true,
+      };
+
+      function chipToKeywordQuery(label) {
+        const s = String(label).replace(/^#+\s*/, "").trim();
+        return s || String(label).trim();
+      }
 
       function esc(value) {
         return String(value)
@@ -137,6 +352,163 @@
 
       function escAttr(value) {
         return String(value).replace(/"/g, "&quot;");
+      }
+
+      function syncKeywordToolbar() {
+        const toolbar = $("economy-keyword-toolbar");
+        const summary = $("economy-keyword-summary");
+        const toggle = $("btn-economy-keyword-toggle");
+        const c = state.chips;
+        const hasChips =
+          c &&
+          c.ok &&
+          ((c.Mom_Keywords && c.Mom_Keywords.length) ||
+            (c.Student_Keywords && c.Student_Keywords.length) ||
+            (c.Common_Topic && String(c.Common_Topic).trim()));
+        if (hasChips && !state.manualKeywordExpanded) {
+          toolbar.classList.add("is-collapsed");
+          const kw = $("economy-keyword").value.trim();
+          summary.textContent = kw ? `브리핑 주제: ${kw}` : "브리핑 주제: 같은 칸의 AI 추천 목록에서 고르세요.";
+        } else {
+          toolbar.classList.remove("is-collapsed");
+          summary.textContent = "";
+        }
+        const inputVisible = !hasChips || state.manualKeywordExpanded;
+        toggle.classList.toggle("is-on", inputVisible);
+        toggle.setAttribute("aria-pressed", inputVisible ? "true" : "false");
+        toggle.setAttribute(
+          "aria-label",
+          inputVisible ? "키워드 입력 접기 (목록 위주 보기)" : "키워드 직접 입력 열기"
+        );
+      }
+
+      function updateChipsLede() {
+        const el = $("economy-chips-lede");
+        if (!el) return;
+        const d = state.chips;
+        if (!d) {
+          el.innerHTML =
+            "접속 시 자동으로·<strong>뉴스 검색</strong> 후 이 칸에 <strong>AI 추천 목록</strong>이 채워집니다. 선택하면 위 입력란에 반영됩니다.";
+          return;
+        }
+        if (!d.ok) {
+          el.innerHTML = `키워드를 가져오지 못했습니다. (${esc(d.message || "오류")})`;
+          return;
+        }
+        if (d.source === "trending") {
+          el.innerHTML =
+            "이 목록은 GPT가 <strong>검색 전</strong>에 제안한 키워드입니다. 고른 뒤 <strong>뉴스 검색</strong>으로 기사를 모으거나, 그대로 <strong>브리핑 생성</strong>을 누르면 서버가 해당 주제로 처리합니다.";
+        } else {
+          el.innerHTML =
+            "이 목록은 <strong>방금 검색된 기사</strong>를 바탕으로 만들었습니다. 선택한 문구는 브리핑 각도에 반영됩니다 (같은 기사 목록 유지).";
+        }
+      }
+
+      function renderChipsUi() {
+        const panel = $("economy-chips-panel");
+        const msgEl = $("economy-chips-message");
+        const sel = $("economy-keyword-picklist");
+        const data = state.chips;
+        msgEl.style.display = "none";
+        msgEl.textContent = "";
+
+        if (!data) {
+          panel.hidden = true;
+          state.chipsFlat = [];
+          if (sel) sel.innerHTML = '<option value="">키워드 받기 실행 후 목록이 표시됩니다.</option>';
+          updateChipsLede();
+          syncKeywordToolbar();
+          return;
+        }
+
+        if (!data.ok) {
+          panel.hidden = false;
+          state.chipsFlat = [];
+          if (sel) sel.innerHTML = '<option value="">목록을 불러오지 못했습니다.</option>';
+          msgEl.style.display = "block";
+          msgEl.textContent = data.message || "키워드를 가져오지 못했습니다.";
+          updateChipsLede();
+          syncKeywordToolbar();
+          return;
+        }
+
+        panel.hidden = false;
+        state.chipsFlat = [];
+        sel.innerHTML = "";
+
+        const ph = document.createElement("option");
+        ph.value = "";
+        ph.textContent = "— 목록에서 선택 또는 🔍로 직접 입력 —";
+        sel.appendChild(ph);
+
+        function appendGroup(title, items) {
+          if (!items.length) return;
+          const og = document.createElement("optgroup");
+          og.label = title;
+          for (const k of items) {
+            const label = String(k).trim();
+            if (!label) continue;
+            const idx = state.chipsFlat.length;
+            state.chipsFlat.push({ label });
+            const opt = document.createElement("option");
+            opt.value = String(idx);
+            opt.textContent = label;
+            og.appendChild(opt);
+          }
+          if (og.childElementCount) sel.appendChild(og);
+        }
+
+        const moms = data.Mom_Keywords || [];
+        const stus = data.Student_Keywords || [];
+        const common = (data.Common_Topic || "").trim();
+        appendGroup("Mom — 40대 주부 타겟", moms);
+        appendGroup("Student — 10대 학생 타겟", stus);
+        if (common) {
+          const idx = state.chipsFlat.length;
+          state.chipsFlat.push({ label: common });
+          const og = document.createElement("optgroup");
+          og.label = "Common — 공통 주제";
+          const opt = document.createElement("option");
+          opt.value = String(idx);
+          opt.textContent = common;
+          og.appendChild(opt);
+          sel.appendChild(og);
+        }
+
+        let pickIdx = -1;
+        if (state.selectedChip) {
+          pickIdx = state.chipsFlat.findIndex((row) => row.label === state.selectedChip);
+        }
+        sel.value = pickIdx >= 0 ? String(pickIdx) : "";
+
+        updateChipsLede();
+        syncKeywordToolbar();
+      }
+
+      function applyChipsFromServer(data, statusLine, isErrStatus = false) {
+        state.chips = data;
+        if (data.ok) {
+          state.manualKeywordExpanded = false;
+          const first =
+            (data.Mom_Keywords && data.Mom_Keywords[0]) ||
+            (data.Student_Keywords && data.Student_Keywords[0]) ||
+            (data.Common_Topic && String(data.Common_Topic).trim());
+          if (first) {
+            $("economy-keyword").value = chipToKeywordQuery(first);
+            state.selectedChip = first;
+          } else {
+            state.selectedChip = null;
+          }
+        } else {
+          state.manualKeywordExpanded = true;
+        }
+        renderChipsUi();
+        if (statusLine) setStatus(statusLine, isErrStatus);
+      }
+
+      function updateChipButtons() {
+        const btn = $("btn-economy-chips-from-news");
+        if (btn) btn.disabled = !state.results.length;
       }
 
       function setStatus(message, isErr = false) {
@@ -183,6 +555,7 @@
             </article>`;
           })
           .join("");
+        updateChipButtons();
       }
 
       function renderSignals() {
@@ -210,6 +583,70 @@
         $("economy-briefing").textContent = state.briefing || "(브리핑 없음)";
       }
 
+      async function fetchKeywordChips() {
+        state.chips = null;
+        state.selectedChip = null;
+        $("economy-chips-panel").hidden = true;
+        if (!state.results.length) return;
+
+        setStatus("기사 기준 키워드 추출 중…");
+        try {
+          const data = await api("/economy/keyword-chips", {
+            results: state.results,
+            diversity_seed: Math.floor(Math.random() * 1_000_000_000),
+          });
+          applyChipsFromServer(
+            data,
+            `완료 · ${state.results.length}건 · 키워드 목록 ${data.ok ? "반영" : "생략"}`
+          );
+        } catch (error) {
+          applyChipsFromServer(
+            {
+              ok: false,
+              message: error.message,
+              Mom_Keywords: [],
+              Student_Keywords: [],
+              Common_Topic: "",
+              source: "news",
+            },
+            `뉴스 ${state.results.length}건 · 키워드 추출 실패: ${error.message}`,
+            true
+          );
+        }
+      }
+
+      async function fetchTrendingChips() {
+        $("economy-chips-panel").hidden = false;
+        const pick = $("economy-keyword-picklist");
+        if (pick) pick.innerHTML = '<option value="">키워드 받는 중…</option>';
+        state.chipsFlat = [];
+        setStatus("키워드 받는 중…");
+        try {
+          const data = await api("/economy/keyword-chips-trending", {
+            hint: $("economy-keyword").value.trim() || null,
+            diversity_seed: Math.floor(Math.random() * 1_000_000_000),
+          });
+          applyChipsFromServer(
+            data,
+            data.ok ? "키워드를 받았습니다. 목록에서 고른 뒤 뉴스 검색 또는 브리핑 생성을 누르세요." : (data.message || "키워드 생성 실패"),
+            !data.ok
+          );
+        } catch (error) {
+          applyChipsFromServer(
+            {
+              ok: false,
+              message: error.message,
+              Mom_Keywords: [],
+              Student_Keywords: [],
+              Common_Topic: "",
+              source: "trending",
+            },
+            error.message,
+            true
+          );
+        }
+      }
+
       async function runSearch() {
         const keyword = $("economy-keyword").value.trim();
         const sort = $("economy-sort").value;
@@ -217,15 +654,21 @@
           setStatus("브리핑 키워드를 입력하세요.", true);
           return;
         }
-        setStatus("경제 뉴스 검색 중…");
+        setStatus("웹에서 최신 뉴스 검색 중…");
         try {
           const data = await api("/economy/search", { keyword, sort });
           state.results = data.results || [];
           state.briefing = "";
+          state.chips = null;
+          state.selectedChip = null;
+          state.manualKeywordExpanded = true;
           renderFeed();
           renderSignals();
           renderBriefing();
+          $("economy-chips-panel").hidden = true;
+          syncKeywordToolbar();
           setStatus(`완료 · ${state.results.length}건 · ${data.sort_label || ""}`);
+          await fetchKeywordChips();
         } catch (error) {
           setStatus(error.message, true);
         }
@@ -240,7 +683,10 @@
         }
         setStatus("브리핑 생성 중…");
         try {
-          const data = await api("/economy/briefing", { keyword, sort, results: state.results });
+          const schoolLevel = $("economy-school-level").value.trim();
+          const body = { keyword, sort, results: state.results };
+          if (schoolLevel) body.school_level = schoolLevel;
+          const data = await api("/economy/briefing", body);
           state.results = data.results || state.results;
           state.briefing = data.briefing || "";
           renderFeed();
@@ -254,10 +700,54 @@
 
       $("btn-economy-search").addEventListener("click", runSearch);
       $("btn-economy-briefing").addEventListener("click", runBriefing);
+      $("btn-economy-chips-gpt").addEventListener("click", fetchTrendingChips);
+      $("btn-economy-chips-from-news").addEventListener("click", () => {
+        if (state.results.length) fetchKeywordChips();
+      });
+
+      $("btn-economy-keyword-toggle").addEventListener("click", () => {
+        const c = state.chips;
+        const hasChips =
+          c &&
+          c.ok &&
+          ((c.Mom_Keywords && c.Mom_Keywords.length) ||
+            (c.Student_Keywords && c.Student_Keywords.length) ||
+            (c.Common_Topic && String(c.Common_Topic).trim()));
+        if (!hasChips) {
+          state.manualKeywordExpanded = true;
+        } else {
+          state.manualKeywordExpanded = !state.manualKeywordExpanded;
+        }
+        syncKeywordToolbar();
+        if (state.manualKeywordExpanded) $("economy-keyword").focus();
+      });
+
+      $("economy-keyword").addEventListener("input", () => {
+        state.selectedChip = null;
+        const pick = $("economy-keyword-picklist");
+        if (pick) pick.value = "";
+        syncKeywordToolbar();
+      });
+
+      $("economy-keyword-picklist").addEventListener("change", () => {
+        const pick = $("economy-keyword-picklist");
+        const v = pick.value;
+        if (v === "") return;
+        const row = state.chipsFlat[parseInt(v, 10)];
+        if (!row) return;
+        $("economy-keyword").value = chipToKeywordQuery(row.label);
+        state.selectedChip = row.label;
+        state.manualKeywordExpanded = false;
+        syncKeywordToolbar();
+      });
 
       renderFeed();
       renderSignals();
       renderBriefing();
+      updateChipButtons();
+      updateChipsLede();
+      syncKeywordToolbar();
+      fetchTrendingChips();
     </script>
   </body>
 </html>

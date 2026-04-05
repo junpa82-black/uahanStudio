@@ -38,7 +38,6 @@
           <span class="brand-mark" aria-hidden="true"></span>
           <span class="brand-text">
             <span class="brand-name">우아한빅토리 스튜디오</span>
-            <span class="brand-sub">검색 · 분석 · 초안 · 한 화면에서</span>
           </span>
         </a>
       </div>
@@ -115,16 +114,20 @@
               <div id="weather-status" class="muted"></div>
             </div>
 
+            <div class="widget weather-briefing-panel" id="weather-briefing-section">
+              <h2 class="section-title" style="margin-top: 0">오늘의 날씨 브리핑</h2>
+              <p class="muted" style="margin: 0 0 0.65rem; font-size: 0.85rem; line-height: 1.45">
+                브리핑 생성 시 입력한 지역의 실시간·24시간 예보·대기질을 바탕으로<br />
+                PART 1 날씨 요약 → PART 2 엄마 살림 캐스터 → PART 3 학생 등교 룩·간식 → PART 4 한 줄 덕담
+              </p>
+              <pre class="out" id="weather-briefing">(브리핑 없음)</pre>
+            </div>
+
             <h2 class="section-title">즐겨찾기 지역</h2>
             <div id="weather-favorites" class="widget muted">저장된 즐겨찾기가 없습니다.</div>
 
             <h2 class="section-title">지역별 실시간 날씨</h2>
             <div id="weather-feed" class="feed-list"></div>
-
-            <h2 class="section-title">오늘의 날씨 브리핑</h2>
-            <div class="widget">
-              <pre class="out" id="weather-briefing">(브리핑 없음)</pre>
-            </div>
           </div>
 
           <aside class="sidebar">

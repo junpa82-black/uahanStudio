@@ -137,12 +137,6 @@ a:hover {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
-.brand-sub {
-  font-size: 0.78rem;
-  color: #b7bdc2;
-  font-weight: 500;
-}
-
 /* —— Subreddit / sort strip —— */
 .community-strip {
   background: linear-gradient(180deg, #e8eaed 0%, #dfe3e8 100%);
@@ -466,19 +460,6 @@ a:hover {
   margin-bottom: 0.85rem;
   box-shadow: var(--shadow-card);
   border-top: 4px solid var(--orange);
-}
-
-.create-card::before {
-  content: "글쓰기";
-  position: absolute;
-  top: 0.65rem;
-  right: 1rem;
-  font-size: 0.65rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--orange);
-  opacity: 0.85;
 }
 
 .create-card label {

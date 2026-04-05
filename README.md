@@ -25,7 +25,7 @@
 | POST | `/api/generate` | `{ "keyword", "tone", "analyzed" }` |
 | POST | `/api/summarize` | `{ "keyword", "analyzed" }` |
 | POST | `/api/images` | `{ "keyword", "markdown" }` |
-| POST | `/api/economy/search` | `{ "keyword", "sort": "date" \| "sim" }` |
+| POST | `/api/economy/search` | `{ "keyword", "sort": "date" \| "sim" }` — OpenAI **웹 검색** 도구로 최신 경제 뉴스를 수집(`OPENAI_API_KEY` 필요). 기사 **원문 URL** 반환 |
 | POST | `/api/economy/briefing` | `{ "keyword", "sort", "results": [] }` (`results` 생략 시 서버에서 뉴스 검색 후 브리핑 생성) |
 | POST | `/api/weather/search` | `{ "regions": ["서울", "부산", ...] }` |
 | POST | `/api/weather/briefing` | `{ "regions": ["서울", "부산", ...] }` |
