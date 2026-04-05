@@ -215,7 +215,7 @@ async def build_economy_briefing_for_students(topic: str, results: list[dict[str
     if base.startswith("분석할 뉴스가 없어"):
         return base
 
-    api_key = _env("OPENAI_API_KEY")
+    api_key = _env("OPENAI_API_KEY").strip().strip('"').strip("'")
     if not api_key:
         return (
             base
@@ -259,9 +259,19 @@ async def build_economy_briefing_for_students(topic: str, results: list[dict[str
         text = (completion.choices[0].message.content or "").strip()
         return text if text else base
     except Exception as exc:
+        err = str(exc)
+        hint = ""
+        if "401" in err or "invalid_api_key" in err or "Incorrect API key" in err:
+            hint = (
+                "\n\n**조치:** OpenAI가 API 키를 거부했습니다(401). "
+                "[API Keys](https://platform.openai.com/api-keys)에서 **새 비밀 키**를 만들고, "
+                "로컬은 `uahanStudio/.env`의 `OPENAI_API_KEY=`, Vercel은 Settings → Environment Variables에 **그대로 붙여 넣기**만 하세요. "
+                "앞뒤 공백·따옴표·잘린 문자가 없는지 확인한 뒤 서버 재시작 또는 **Redeploy** 하세요. "
+                "이전에 노출된 키는 삭제하는 것이 안전합니다."
+            )
         return (
             base
-            + f"\n\n---\n\n**(학생용 설명 자동 생성에 실패했습니다: {exc})**\n위는 규칙 기반 브리핑 원문입니다."
+            + f"\n\n---\n\n**(학생용 설명 자동 생성에 실패했습니다)**\n{err}{hint}\n\n위는 규칙 기반 브리핑 원문입니다."
         )
 
 
@@ -876,13 +886,14 @@ def llm_generate_article(topic: str, refs: list[dict[str, Any]], tone: str) -> s
    [IMAGE_PLACEHOLDER_2]
 5) 마크다운 형식
 """
-    if not _env("OPENAI_API_KEY"):
+    api_key = _env("OPENAI_API_KEY").strip().strip('"').strip("'")
+    if not api_key:
         return generate_local_creative_article(topic, refs, tone)
 
     try:
         from openai import OpenAI
 
-        client = OpenAI(api_key=_env("OPENAI_API_KEY"))
+        client = OpenAI(api_key=api_key)
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
