@@ -92,13 +92,17 @@
               <div id="economy-status" class="muted"></div>
             </div>
 
+            <div class="widget economy-briefing-panel" id="economy-briefing-section">
+              <h2 class="section-title" style="margin-top: 0">오늘의 브리핑</h2>
+              <p class="muted" style="margin: 0 0 0.65rem; font-size: 0.85rem; line-height: 1.45">
+                <strong>브리핑 생성</strong>을 누르면 GPT가 아래 순서로 정리합니다.<br />
+                PART 1 엄마 실속 리포트 → PART 2 학생 뉴스 3분 컷 → PART 3 저녁 식탁 대화 가이드 → 마지막에 삽화용 영문 이미지 프롬프트 한 줄.
+              </p>
+              <pre class="out economy-briefing-out" id="economy-briefing">(브리핑 없음)</pre>
+            </div>
+
             <h2 class="section-title">뉴스 피드</h2>
             <div id="economy-feed" class="feed-list"></div>
-
-            <h2 class="section-title">오늘의 브리핑</h2>
-            <div class="widget">
-              <pre class="out" id="economy-briefing">(브리핑 없음)</pre>
-            </div>
           </div>
 
           <aside class="sidebar">
@@ -109,9 +113,9 @@
             <div class="widget">
               <h2 class="section-title">사용 안내</h2>
               <div class="muted">
-                1) 뉴스 검색으로 최신 이슈를 모읍니다.<br />
-                2) 브리핑 생성을 누르면 핵심 키워드와 시사점이 정리됩니다.<br />
-                3) 키워드를 바꿔 테마별 브리핑을 반복 확인하세요.
+                1) <strong>뉴스 검색</strong>으로 기사 목록을 불러옵니다.<br />
+                2) <strong>브리핑 생성</strong>은 엄마·학생·가족 대화용 통합 리포트(GPT)입니다. <code>OPENAI_API_KEY</code> 필요.<br />
+                3) 학생 파트 난이도는 서버 환경 변수 <code>BRIEFING_SCHOOL_LEVEL</code>(초등/중등/고등, 기본 중등)로 조절할 수 있습니다.
               </div>
             </div>
           </aside>

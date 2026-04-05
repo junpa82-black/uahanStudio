@@ -209,8 +209,41 @@ def build_economy_briefing(topic: str, results: list[dict[str, Any]]) -> str:
     )
 
 
-async def build_economy_briefing_for_students(topic: str, results: list[dict[str, Any]]) -> str:
-    """규칙 기반 요약을 바탕으로 ChatGPT로 학생(고등·대학) 대상 쉬운 설명 브리핑 생성."""
+def _economy_news_article_block(topic: str, results: list[dict[str, Any]], base_briefing: str) -> str:
+    """LLM에 넣을 뉴스 맥락: 자동 브리핑 + 기사 스니펫."""
+    parts = [
+        f"[검색 주제]\n{topic}\n",
+        "[자동 브리핑 요약]\n" + base_briefing + "\n",
+        "[개별 기사 스니펫]\n",
+    ]
+    for i, row in enumerate(results[:12], 1):
+        title = (row.get("title") or "").strip()
+        desc = (row.get("description") or "").strip()
+        src = (row.get("source") or "뉴스").strip()
+        link = (row.get("link") or "").strip()
+        tail = f"\n   링크: {link}" if link else ""
+        parts.append(f"{i}. [{src}] {title}\n   본문/요약 일부: {desc[:500]}{tail}\n")
+    return "\n".join(parts)
+
+
+_BRIEFING_SCHOOL_LEVELS = frozenset({"초등", "중등", "고등"})
+
+
+def _part2_school_instruction(request_level: str | None) -> str:
+    """PART 2 제목 괄호 안 학력·난이도 지시. 미지정 시 40대 주부 가정 기준."""
+    for candidate in ((request_level or "").strip(), (_env("BRIEFING_SCHOOL_LEVEL") or "").strip()):
+        if candidate in _BRIEFING_SCHOOL_LEVELS:
+            return f"10대 학생 타겟, 학력 수준: {candidate}"
+    return (
+        "40대 주부 가정 기준(학년 미지정) — PART 1 독자와 같은 가정의 자녀에게, "
+        "저녁 식탁에서 나눌 만한 보통 한국어 난이도로 설명 (초·중·고를 특정하지 말 것)"
+    )
+
+
+async def build_economy_briefing_for_students(
+    topic: str, results: list[dict[str, Any]], school_level: str | None = None
+) -> str:
+    """규칙 기반 요약 + 뉴스 스니펫을 바탕으로 ChatGPT 통합 브리핑(엄마·학생·식탁 대화) 생성."""
     base = build_economy_briefing(topic, results)
     if base.startswith("분석할 뉴스가 없어"):
         return base
@@ -223,21 +256,57 @@ async def build_economy_briefing_for_students(topic: str, results: list[dict[str
             "(로컬: `.env`, Vercel: Environment Variables) 위 내용은 규칙 기반 요약입니다."
         )
 
-    prompt = f"""아래 텍스트는 네이버 뉴스 검색 결과를 자동으로 묶은 '경제 데일리 브리핑' 초안입니다.
-고등학생·대학생이 시사·경제를 처음 배운다고 가정하고, **선생님이 수업 시간에 친절히 설명해 주는 말투**(존댓말·해요체)로 다시 정리해 주세요.
+    part2_school = _part2_school_instruction(school_level)
+    news_article = _economy_news_article_block(topic, results, base)
 
-작성 규칙:
-1) 반말 금지.
-2) 어려운 경제 용어는 괄호로 한 줄 풀이(예: 기준금리(은행이 돈을 빌릴 때 기준이 되는 이자율)).
-3) 구조:
-   - 먼저 `## 오늘 한 줄 요약` 아래에 핵심 1~2문장.
-   - `## 왜 중요한가요?` `## 뉴스에서 반복되는 말은?` `## 스스로 확인해 보면 좋은 것`(또는 비슷한 소제목)처럼 2~4개의 `##` 소제목으로 나누기.
-4) 초안에 나온 헤드라인 중 3~5개를 골라, **왜 이 이슈가 같이 언급되는지** 연결해서 설명. 제목만 나열하지 말 것.
-5) 특정 주식·코인 매수·매도, 투자 권유 문구는 넣지 말 것.
-6) 마크다운(`##`, `-` 목록)만 사용. 인사말·메타 설명("다음과 같이 정리했습니다" 같은 문구)은 짧게.
+    system_persona = (
+        "너는 40대 주부에게는 **'지혜로운 자산 관리 멘토'**가 되어주고, 10대 학생에게는 "
+        "**'세상 돌아가는 법을 알려주는 친한 형/누나'**가 되어주는 경제 분석가야. "
+        "아래 제공되는 뉴스 기사와 요약을 읽고, 두 사람의 눈높이에 맞춰 이중 구조로 분석해줘. "
+        "제공된 자료에 없는 사실을 지어내지 말 것."
+    )
 
---- 초안 ---
-{base}
+    user_instructions = f"""[통합 분석 프롬프트: 경제 뉴스로 잇는 우리 집]
+
+2. 출력 포맷 지시 사항 (Output Structure) — 반드시 아래 순서·제목(이모지 포함)을 지킬 것.
+
+[PART 1. 엄마를 위한 실속 리포트 (40대 주부 타겟)]
+
+📍 한 줄 핵심: 이 뉴스가 우리 가계에 미치는 영향 (한 문장 요약)
+
+🛒 장바구니/가계부 영향: 물가, 공공요금, 금리 등 실생활 지출과 관련된 변화 예측 및 대처법.
+
+🎓 엄마의 교육 한마디: 이 뉴스를 소재로 아이에게 가르쳐줄 수 있는 경제 원리(예: 인플레이션, 환율 등)와 대화 시작 멘트.
+
+[PART 2. 학생을 위한 뉴스 3분 컷 ({part2_school})]
+
+🔥 이게 왜 핫해?: (10대에게 익숙한 표현·이모지를 섞어서) 이 사건이 왜 주목받는지 쉽게 설명.
+
+🎮 용돈 체감 지수: "떡볶이 1인분 가격으로 이젠 0.8인분밖에…" 같은 **구체적인 용돈·물가 비유**를 넣을 것.
+
+🚀 미래 내 직업은?: 이 뉴스와 관련된 미래 유망 산업이나 준비하면 좋을 능력.
+
+[PART 3. 오늘 저녁 식탁 대화 가이드]
+
+💬 대화 퀴즈: 엄마가 아이에게 낼 수 있는 가벼운 퀴즈 1문제 (정답 포함).
+
+🤝 가족 미션: "이번 주말엔 다 같이 편의점 수입 과자 가격 확인해보기" 같은 소소한 행동 과제.
+
+3. 제약 사항 (Constraints)
+
+- 말투: 엄마 파트는 신뢰감 있고 다정한 말투로, 학생 파트는 친근하고 통통 튀는 구어체로 작성할 것.
+- 금기: 지나치게 어려운 전문 용어는 반드시 일상적인 비유(학교, 게임, 쇼핑 등)로 풀어서 설명할 것.
+- 길이: 전체는 스마트폰 한 화면~두 화면 정도로, 섹션별 핵심만 간결하게.
+- 특정 주식·코인 매수/매도 권유, 불법·혐오 표현 금지.
+
+4. 마지막에 반드시 한 줄 추가
+이 뉴스를 바탕으로 **엄마와 아이가 웃으며 대화하는 삽화 스타일** 이미지를 만들기 위한 **영문 이미지 생성 프롬프트**를 한 줄로 적을 것. 형식: `(Image prompt: ...)` 
+
+---
+
+[뉴스 기사 전문·맥락: 아래 블록만 근거로 작성]
+
+{news_article}
 """
 
     try:
@@ -247,14 +316,11 @@ async def build_economy_briefing_for_students(topic: str, results: list[dict[str
         completion = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {
-                    "role": "system",
-                    "content": "당신은 한국어 시사·경제 교양 수업을 맡은 교사입니다. 사실 왜곡 없이, 초안에 있는 뉴스 맥락 안에서만 설명합니다.",
-                },
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": system_persona},
+                {"role": "user", "content": user_instructions},
             ],
             temperature=0.45,
-            max_tokens=2200,
+            max_tokens=4000,
         )
         text = (completion.choices[0].message.content or "").strip()
         return text if text else base
