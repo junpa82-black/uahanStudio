@@ -13,10 +13,18 @@ from urllib.parse import quote_plus, urlparse
 
 import httpx
 
+_NAVER_ENV_MSG = (
+    "NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET을 환경 변수에 설정해 주세요. "
+    "로컬: uahanStudio 폴더에 .env를 두세요(.env.example 복사 후 값 입력). "
+    "python-dotenv가 설치되어 있어야 .env가 읽힙니다. "
+    "Vercel: Project → Settings → Environment Variables에 추가 후 재배포하세요."
+)
+
 try:
     from dotenv import load_dotenv
 
-    load_dotenv()
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+    load_dotenv(_env_path)
 except ImportError:
     pass
 
@@ -60,10 +68,7 @@ async def search_blog_by_naver_mcp(query: str, display: int = 10, sort: str = "s
     client_id = _env("NAVER_CLIENT_ID")
     client_secret = _env("NAVER_CLIENT_SECRET")
     if not client_id or not client_secret:
-        raise ValueError(
-            "NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET을 환경 변수에 설정해 주세요. "
-            "(Vercel: Project → Settings → Environment Variables)"
-        )
+        raise ValueError(_NAVER_ENV_MSG)
     url = "https://openapi.naver.com/v1/search/blog.json"
     headers = {
         "X-Naver-Client-Id": client_id,
@@ -106,10 +111,7 @@ async def search_news_by_naver_api(query: str, display: int = 12, sort: str = "d
     client_id = _env("NAVER_CLIENT_ID")
     client_secret = _env("NAVER_CLIENT_SECRET")
     if not client_id or not client_secret:
-        raise ValueError(
-            "NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET을 환경 변수에 설정해 주세요. "
-            "(Vercel: Project → Settings → Environment Variables)"
-        )
+        raise ValueError(_NAVER_ENV_MSG)
 
     url = "https://openapi.naver.com/v1/search/news.json"
     headers = {
@@ -207,6 +209,62 @@ def build_economy_briefing(topic: str, results: list[dict[str, Any]]) -> str:
     )
 
 
+async def build_economy_briefing_for_students(topic: str, results: list[dict[str, Any]]) -> str:
+    """규칙 기반 요약을 바탕으로 ChatGPT로 학생(고등·대학) 대상 쉬운 설명 브리핑 생성."""
+    base = build_economy_briefing(topic, results)
+    if base.startswith("분석할 뉴스가 없어"):
+        return base
+
+    api_key = _env("OPENAI_API_KEY")
+    if not api_key:
+        return (
+            base
+            + "\n\n---\n\n**학생용 쉬운 설명**을 쓰려면 환경 변수 `OPENAI_API_KEY`를 설정해 주세요. "
+            "(로컬: `.env`, Vercel: Environment Variables) 위 내용은 규칙 기반 요약입니다."
+        )
+
+    prompt = f"""아래 텍스트는 네이버 뉴스 검색 결과를 자동으로 묶은 '경제 데일리 브리핑' 초안입니다.
+고등학생·대학생이 시사·경제를 처음 배운다고 가정하고, **선생님이 수업 시간에 친절히 설명해 주는 말투**(존댓말·해요체)로 다시 정리해 주세요.
+
+작성 규칙:
+1) 반말 금지.
+2) 어려운 경제 용어는 괄호로 한 줄 풀이(예: 기준금리(은행이 돈을 빌릴 때 기준이 되는 이자율)).
+3) 구조:
+   - 먼저 `## 오늘 한 줄 요약` 아래에 핵심 1~2문장.
+   - `## 왜 중요한가요?` `## 뉴스에서 반복되는 말은?` `## 스스로 확인해 보면 좋은 것`(또는 비슷한 소제목)처럼 2~4개의 `##` 소제목으로 나누기.
+4) 초안에 나온 헤드라인 중 3~5개를 골라, **왜 이 이슈가 같이 언급되는지** 연결해서 설명. 제목만 나열하지 말 것.
+5) 특정 주식·코인 매수·매도, 투자 권유 문구는 넣지 말 것.
+6) 마크다운(`##`, `-` 목록)만 사용. 인사말·메타 설명("다음과 같이 정리했습니다" 같은 문구)은 짧게.
+
+--- 초안 ---
+{base}
+"""
+
+    try:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=api_key)
+        completion = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "당신은 한국어 시사·경제 교양 수업을 맡은 교사입니다. 사실 왜곡 없이, 초안에 있는 뉴스 맥락 안에서만 설명합니다.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.45,
+            max_tokens=2200,
+        )
+        text = (completion.choices[0].message.content or "").strip()
+        return text if text else base
+    except Exception as exc:
+        return (
+            base
+            + f"\n\n---\n\n**(학생용 설명 자동 생성에 실패했습니다: {exc})**\n위는 규칙 기반 브리핑 원문입니다."
+        )
+
+
 def _wind_feel_desc(speed_mps: float) -> str:
     if speed_mps < 2:
         return "거의 바람이 느껴지지 않아요."
@@ -257,16 +315,76 @@ def _to_local_time_label(iso_time: str) -> str:
         return iso_time
 
 
-async def geocode_city(query: str, count: int = 8) -> list[dict[str, Any]]:
-    url = "https://geocoding-api.open-meteo.com/v1/search"
-    params = {"name": query, "count": count, "language": "ko", "format": "json"}
-    async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.get(url, params=params)
-        response.raise_for_status()
-        payload = response.json()
+# Open-Meteo Geocoding은 한글 단독 검색(예: name=서울)에서 results가 비는 경우가 많음 → 영문 검색으로 폴백
+_KOREAN_REGION_ENGLISH: dict[str, str] = {
+    "서울": "Seoul",
+    "서울시": "Seoul",
+    "서울특별시": "Seoul",
+    "부산": "Busan",
+    "부산광역시": "Busan",
+    "대구": "Daegu",
+    "대구광역시": "Daegu",
+    "인천": "Incheon",
+    "인천광역시": "Incheon",
+    "광주": "Gwangju",
+    "광주광역시": "Gwangju",
+    "대전": "Daejeon",
+    "대전광역시": "Daejeon",
+    "울산": "Ulsan",
+    "울산광역시": "Ulsan",
+    "세종": "Sejong",
+    "세종시": "Sejong",
+    "세종특별자치시": "Sejong",
+    "수원": "Suwon",
+    "수원시": "Suwon",
+    "성남": "Seongnam",
+    "성남시": "Seongnam",
+    "고양": "Goyang",
+    "고양시": "Goyang",
+    "용인": "Yongin",
+    "용인시": "Yongin",
+    "제주": "Jeju City",
+    "제주시": "Jeju City",
+    "제주도": "Jeju City",
+    "제주특별자치도": "Jeju City",
+    "강릉": "Gangneung",
+    "강릉시": "Gangneung",
+    "춘천": "Chuncheon",
+    "춘천시": "Chuncheon",
+    "전주": "Jeonju",
+    "전주시": "Jeonju",
+    "청주": "Cheongju",
+    "청주시": "Cheongju",
+    "천안": "Cheonan",
+    "천안시": "Cheonan",
+    "포항": "Pohang",
+    "포항시": "Pohang",
+    "창원": "Changwon",
+    "창원시": "Changwon",
+    "김해": "Gimhae",
+    "김해시": "Gimhae",
+    "평택": "Pyeongtaek",
+    "평택시": "Pyeongtaek",
+    "의정부": "Uijeongbu",
+    "의정부시": "Uijeongbu",
+    "시흥": "Siheung",
+    "시흥시": "Siheung",
+    "파주": "Paju",
+    "파주시": "Paju",
+}
 
+
+def _korean_region_english_fallback(query: str) -> str | None:
+    q = (query or "").strip()
+    if not q:
+        return None
+    compact = q.replace(" ", "")
+    return _KOREAN_REGION_ENGLISH.get(q) or _KOREAN_REGION_ENGLISH.get(compact)
+
+
+def _rows_to_geocode_out(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for row in payload.get("results", []) or []:
+    for row in rows:
         admin_bits = [row.get("admin1"), row.get("admin2"), row.get("country")]
         admin_label = ", ".join([x for x in admin_bits if x])
         out.append(
@@ -282,6 +400,43 @@ async def geocode_city(query: str, count: int = 8) -> list[dict[str, Any]]:
     return out
 
 
+async def _geocode_open_meteo_raw(
+    name: str, *, count: int, language: str, country_code: str | None = None
+) -> list[dict[str, Any]]:
+    url = "https://geocoding-api.open-meteo.com/v1/search"
+    params: dict[str, Any] = {"name": name, "count": count, "language": language, "format": "json"}
+    if country_code:
+        params["countryCode"] = country_code
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        payload = response.json()
+    return payload.get("results", []) or []
+
+
+async def geocode_city(query: str, count: int = 8) -> list[dict[str, Any]]:
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    for lang in ("ko", "en"):
+        rows = await _geocode_open_meteo_raw(q, count=count, language=lang)
+        if rows:
+            return _rows_to_geocode_out(rows)[:count]
+
+    en_name = _korean_region_english_fallback(q)
+    if en_name:
+        for lang in ("en", "ko"):
+            rows = await _geocode_open_meteo_raw(en_name, count=count, language=lang, country_code="KR")
+            if rows:
+                return _rows_to_geocode_out(rows)[:count]
+            rows = await _geocode_open_meteo_raw(en_name, count=count, language=lang)
+            if rows:
+                return _rows_to_geocode_out(rows)[:count]
+
+    return []
+
+
 async def fetch_weather_now(latitude: float, longitude: float, timezone: str = "Asia/Seoul") -> dict[str, Any]:
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
@@ -290,7 +445,7 @@ async def fetch_weather_now(latitude: float, longitude: float, timezone: str = "
         "timezone": timezone,
         "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation,rain,showers,snowfall",
         "hourly": "weather_code,temperature_2m,wind_speed_10m,precipitation_probability",
-        "forecast_days": 1,
+        "forecast_days": 2,
     }
     async with httpx.AsyncClient(timeout=25) as client:
         response = await client.get(url, params=params)
@@ -339,10 +494,22 @@ async def fetch_weather_now(latitude: float, longitude: float, timezone: str = "
     w10 = hourly.get("wind_speed_10m", []) or []
     pprob = hourly.get("precipitation_probability", []) or []
     wcode = hourly.get("weather_code", []) or []
-    for idx in range(min(8, len(times))):
+
+    # 현재 시각에 가장 가까운 시각(이전 정시 슬롯)부터 이후 24시간
+    start_idx = 0
+    if now_time and times:
+        for i, t in enumerate(times):
+            if isinstance(t, str) and t <= now_time:
+                start_idx = i
+            else:
+                break
+    end_idx = min(start_idx + 24, len(times))
+    for idx in range(start_idx, end_idx):
         code = str(wcode[idx]) if idx < len(wcode) else "0"
         cond = weather_map.get(code, f"코드 {code}")
         hour = times[idx]
+        hour_int = int(hour[11:13]) if isinstance(hour, str) and len(hour) >= 13 and hour[11:13].isdigit() else 12
+        slot_day = 7 <= hour_int <= 18
         timeline.append(
             {
                 "time": _to_local_time_label(hour),
@@ -350,7 +517,7 @@ async def fetch_weather_now(latitude: float, longitude: float, timezone: str = "
                 "wind_mps": w10[idx] if idx < len(w10) else None,
                 "precip_probability": pprob[idx] if idx < len(pprob) else None,
                 "condition": cond,
-                "icon": _weather_icon(cond, is_day=True),
+                "icon": _weather_icon(cond, is_day=slot_day),
             }
         )
 

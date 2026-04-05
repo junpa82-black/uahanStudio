@@ -13,6 +13,23 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
+    <style>
+      .weather-timeline-scroll {
+        max-height: min(72vh, 780px);
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-right: 0.25rem;
+      }
+      .weather-timeline-scroll .insight-item {
+        padding: 0.4rem 0;
+        font-size: 0.82rem;
+      }
+      .weather-timeline-scroll .weather-region-block:last-child {
+        border-bottom: none !important;
+        margin-bottom: 0 !important;
+        padding-bottom: 0 !important;
+      }
+    </style>
   </head>
   <body>
     <header class="site-header">
@@ -121,8 +138,10 @@
               </div>
             </div>
             <div class="widget">
-              <h2 class="section-title">시간대 예보</h2>
-              <div id="weather-timeline" class="muted">실시간 검색 후 지역별 8시간 예보가 표시됩니다.</div>
+              <h2 class="section-title">시간대 예보 (24시간)</h2>
+              <div id="weather-timeline" class="muted weather-timeline-scroll">
+                실시간 검색 후 지역별 24시간 예보가 표시됩니다.
+              </div>
             </div>
           </aside>
         </div>
@@ -327,17 +346,15 @@
         const el = $("weather-timeline");
         const okItems = state.items.filter((x) => x.ok);
         if (!okItems.length) {
-          el.textContent = "실시간 검색 후 지역별 8시간 예보가 표시됩니다.";
-          el.className = "muted";
+          el.textContent = "실시간 검색 후 지역별 24시간 예보가 표시됩니다.";
+          el.className = "muted weather-timeline-scroll";
           return;
         }
-        el.className = "";
+        el.className = "weather-timeline-scroll";
         el.innerHTML = okItems
-          .slice(0, 3)
           .map((row) => {
             const name = row.location?.name || row.region_query || "지역";
             const lines = (row.weather?.timeline || [])
-              .slice(0, 8)
               .map(
                 (t) =>
                   `<div class="insight-item"><strong>${esc(t.time)} ${esc(t.icon || "🌤️")} ${esc(t.condition || "")}</strong><div class="muted">${esc(
@@ -345,7 +362,7 @@
                   )}</div></div>`
               )
               .join("");
-            return `<div style="margin-bottom:0.8rem"><strong>${esc(name)}</strong>${lines}</div>`;
+            return `<div class="weather-region-block" style="margin-bottom:0.85rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border)"><strong>${esc(name)}</strong>${lines}</div>`;
           })
           .join("");
       }
@@ -437,6 +454,12 @@
       }
 
       $("btn-weather-search").addEventListener("click", runSearch);
+      $("weather-regions").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          runSearch();
+        }
+      });
       $("btn-weather-briefing").addEventListener("click", runBriefing);
       $("btn-refresh-toggle").addEventListener("click", toggleAutoRefresh);
       $("btn-favorite-save").addEventListener("click", saveCurrentAsFavorite);
